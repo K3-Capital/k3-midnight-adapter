@@ -114,4 +114,9 @@ contract PolicySetterRatifierTest is Test {
         vm.expectRevert(IPolicySetterRatifier.InvalidProof.selector);
         midnight.ratify(ratifier, offer, abi.encode(root, 0, new bytes32[](0)));
     }
+
+    function testMalformedRatifierDataFails() public {
+        vm.expectRevert(IPolicySetterRatifier.MalformedRatifierData.selector);
+        midnight.ratify(ratifier, offer, hex"00");
+    }
 }

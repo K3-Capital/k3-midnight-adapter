@@ -513,7 +513,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         }
         if (id != HashLib.hashMarket(market) || !marketEnabled[id] || market.loanToken != asset) revert InvalidOffer();
         if (data.length != 0 || units == 0) revert InvalidCallback();
-        _checkpoint(id, market, pendingFeeDecrease, units);
+        uint256 postSaleClaim = _checkpoint(id, market, pendingFeeDecrease, units);
         MarketAccounting storage a = accounting[id];
         if (units > a.trackedCredit || a.trackedCredit == 0) revert InsufficientCredit();
         uint256 oldBook = a.bookValue;
@@ -522,6 +522,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         a.netMaturityClaim =
             _toUint128(uint256(a.netMaturityClaim) - uint256(a.netMaturityClaim) * units / a.trackedCredit);
         a.trackedCredit = _toUint128(uint256(a.trackedCredit) - units);
+        // Midnight has already reduced seller credit and pending fee. The proportional reduction above applies
+        // the sale once; only a stricter post-sale protocol claim may reduce the remaining claim further.
+        if (postSaleClaim < a.netMaturityClaim) a.netMaturityClaim = _toUint128(postSaleClaim);
         int256 pnl = int256(sellerAssets) - int256(reduction);
         if (sellerAssets != 0) {
             (uint256 supplied,) = IMorpho(morphoBlue).supply(blue.market, sellerAssets, 0, address(this), hex"");
@@ -535,7 +538,10 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         return CALLBACK_SUCCESS;
     }
 
-    function _checkpoint(bytes32 id, MidnightMarket memory market, uint256 feeDecrease, uint256 soldUnits) internal {
+    function _checkpoint(bytes32 id, MidnightMarket memory market, uint256 feeDecrease, uint256 soldUnits)
+        internal
+        returns (uint256 postSaleClaim)
+    {
         MarketAccounting storage a = accounting[id];
         if (a.active && a.trackedCredit != 0) {
             (uint128 credit, uint128 pendingFee,) = IMidnight(midnight).updatePositionView(market, id, address(this));
@@ -546,8 +552,8 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
                 a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) * preSaleCredit / oldCredit);
                 a.trackedCredit = _toUint128(preSaleCredit);
             }
-            uint256 currentClaim = uint256(credit) + pendingFee;
-            if (currentClaim < a.netMaturityClaim) a.netMaturityClaim = _toUint128(currentClaim);
+            postSaleClaim = uint256(credit) + pendingFee;
+            if (soldUnits == 0 && postSaleClaim < a.netMaturityClaim) a.netMaturityClaim = _toUint128(postSaleClaim);
         }
         uint256 checkpoint = a.lastCheckpoint == 0 ? block.timestamp : a.lastCheckpoint;
         if (block.timestamp > checkpoint && a.netMaturityClaim > a.bookValue && market.maturity > checkpoint) {
@@ -555,8 +561,10 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             uint256 duration = market.maturity - checkpoint;
             a.bookValue = _toUint128(uint256(a.bookValue) + (a.netMaturityClaim - a.bookValue) * elapsed / duration);
         }
-        if (feeDecrease >= a.netMaturityClaim) a.netMaturityClaim = 0;
-        else a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) - feeDecrease);
+        if (soldUnits == 0) {
+            if (feeDecrease >= a.netMaturityClaim) a.netMaturityClaim = 0;
+            else a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) - feeDecrease);
+        }
         a.lastCheckpoint = uint40(block.timestamp < market.maturity ? block.timestamp : market.maturity);
     }
 

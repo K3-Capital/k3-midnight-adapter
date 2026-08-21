@@ -174,6 +174,7 @@ contract AccountingMidnightMock {
         uint256 feeDecrease
     ) external returns (bytes32) {
         credit[id] -= uint128(units);
+        pendingFee[id] -= uint128(feeDecrease);
         uint256 balance = token.balanceOf(address(this));
         if (assets > balance) token.mint(address(this), assets - balance);
         token.transfer(address(adapter), assets);
@@ -281,6 +282,26 @@ contract BlueMidnightAdapterAccountingTest is Test {
         // Morpho's virtual-share conversion rounds the mock's one-decimal gain down by one unit;
         // the assertion still proves proceeds appear once in Blue rather than as duplicated adapter cash.
         assertEq(adapter.realAssets(), initialNav + 9);
+    }
+
+    function testPartialSellReducesClaimExactlyOnceAfterMidnightUpdatesCredit() public {
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 0);
+        midnight.takeMakerSell(adapter, midnightId, midnightMarket, 50, 50, 0);
+
+        MarketAccounting memory a = adapter.marketAccounting(midnightId);
+        assertEq(a.trackedCredit, 50);
+        assertEq(a.bookValue, 50);
+        assertEq(a.netMaturityClaim, 50);
+    }
+
+    function testPartialSellCapsClaimToPostSalePendingFeeAfterRounding() public {
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 3);
+        midnight.takeMakerSell(adapter, midnightId, midnightMarket, 50, 50, 2);
+
+        MarketAccounting memory a = adapter.marketAccounting(midnightId);
+        assertEq(a.trackedCredit, 50);
+        assertEq(a.bookValue, 50);
+        assertEq(a.netMaturityClaim, 51);
     }
 
     function testOfferBindsEpochGroupAndSellInventory() public {

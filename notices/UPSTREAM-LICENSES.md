@@ -1,0 +1,1 @@
+This project combines GPL-2.0-or-later upstream sources from Morpho Association with project scaffolding. The applicable upstream license texts are retained in the pinned dependency submodules under `lib/`. No upstream source has been modified in Stage 1.

@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+pragma solidity 0.8.34;
+
+import {MarketParams} from "morpho-blue/interfaces/IMorpho.sol";
+
+/// @dev Shared data shapes only; behavior is intentionally deferred to later stack layers.
+struct BlueMarketConfig {
+    MarketParams market;
+    bytes32 marketId;
+}
+
+struct MarketAccounting {
+    uint128 bookValue;
+    uint128 netMaturityClaim;
+    uint128 trackedCredit;
+    uint40 lastCheckpoint;
+    bool active;
+}

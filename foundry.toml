@@ -1,0 +1,23 @@
+[profile.default]
+solc_version = "0.8.34"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+libs = ["lib"]
+src = "src"
+out = "out"
+test = "test"
+script = "script"
+remappings = [
+    "forge-std/=lib/forge-std/src/",
+    "midnight/=lib/midnight/src/",
+    "vault-v2/=lib/vault-v2/src/",
+    "morpho-blue/=lib/morpho-blue/src/"
+]
+
+[fmt]
+line_length = 120
+wrap_comments = true
+
+[fuzz]
+runs = 256

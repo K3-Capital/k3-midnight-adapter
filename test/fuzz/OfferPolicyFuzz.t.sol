@@ -49,6 +49,7 @@ contract OfferPolicyFuzzTest is Test {
         offer.ratifier = address(ratifier);
         offer.market.chainId = block.chainid;
         offer.market.midnight = address(midnight);
+        // forge-lint: disable-next-line(unsafe-typecast)
         offer.maxAssets = uint128(maxAssets);
         bytes32 root = HashLib.hashOffer(offer);
 

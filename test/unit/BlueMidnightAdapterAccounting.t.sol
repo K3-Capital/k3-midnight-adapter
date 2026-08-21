@@ -375,49 +375,47 @@ contract BlueMidnightAdapterAccountingTest is Test {
         target.setMarketPolicy(marketId, 1_000_000, 1_000_000, true);
     }
 
+    function _rejectEconomicPolicy(BlueMidnightAdapter target, bytes32 marketId, MarketEconomicPolicy memory policy)
+        internal
+    {
+        uint64 before = target.policyEpoch();
+        bytes memory data = abi.encodeWithSelector(target.setMarketEconomicPolicy.selector, marketId, policy);
+        target.submit(data);
+        vm.warp(target.executableAt(data));
+        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
+        target.setMarketEconomicPolicy(marketId, policy);
+        assertEq(target.policyEpoch(), before);
+        (uint24 maxBuyTick,,,,,, bool configured) = target.marketEconomicPolicy(marketId);
+        assertEq(maxBuyTick, 0);
+        assertFalse(configured);
+    }
+
+    function _assertTighteningRejected(MarketEconomicPolicy memory policy, uint64 expectedEpoch) internal {
+        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
+        adapter.tightenMarketEconomicPolicy(midnightId, policy);
+        assertEq(adapter.policyEpoch(), expectedEpoch);
+    }
+
     function testEconomicPolicyConfigurationRejectsEveryInvalidField() public {
         BlueMidnightAdapter fresh =
             new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(0x4444));
-        MarketEconomicPolicy memory policy = _policy(100, 10, 31 days, 30 days, 0, 0);
-
-        bytes32[9] memory ids = [
-            bytes32("zero-market"),
-            bytes32("unconfigured"),
-            bytes32("buy-tick"),
-            bytes32("sell-tick"),
-            bytes32("zero-tenor"),
-            bytes32("zero-expiry"),
-            bytes32("horizon"),
-            bytes32("continuous-fee"),
-            bytes32("settlement-fee")
-        ];
-        MarketEconomicPolicy[9] memory invalidPolicies;
-        invalidPolicies[0] = policy;
-        invalidPolicies[1] = policy;
-        invalidPolicies[1].configured = false;
-        invalidPolicies[2] = policy;
-        invalidPolicies[2].maxBuyTick = uint24(MAX_TICK + 1);
-        invalidPolicies[3] = policy;
-        invalidPolicies[3].minSellTick = uint24(MAX_TICK + 1);
-        invalidPolicies[4] = policy;
-        invalidPolicies[4].maxTenor = 0;
-        invalidPolicies[5] = policy;
-        invalidPolicies[5].maxExpiryHorizon = 0;
-        invalidPolicies[6] = policy;
-        invalidPolicies[6].maxExpiryHorizon = 31 days + 1;
-        invalidPolicies[7] = policy;
-        invalidPolicies[7].maxContinuousFeePerSecondWad = uint32(MAX_CONTINUOUS_FEE + 1);
-        invalidPolicies[8] = policy;
-        invalidPolicies[8].maxSettlementFeeWad = uint64(MAX_SETTLEMENT_FEE_360_DAYS + 1);
-
-        for (uint256 i; i < invalidPolicies.length; ++i) {
-            bytes memory data =
-                abi.encodeWithSelector(fresh.setMarketEconomicPolicy.selector, ids[i], invalidPolicies[i]);
-            fresh.submit(data);
-            vm.warp(fresh.executableAt(data));
-            vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
-            fresh.setMarketEconomicPolicy(ids[i], invalidPolicies[i]);
-        }
+        _rejectEconomicPolicy(fresh, bytes32(0), _policy(100, 10, 31 days, 30 days, 0, 0));
+        MarketEconomicPolicy memory unconfigured = _policy(100, 10, 31 days, 30 days, 0, 0);
+        unconfigured.configured = false;
+        _rejectEconomicPolicy(fresh, keccak256("unconfigured"), unconfigured);
+        _rejectEconomicPolicy(fresh, keccak256("buy-tick"), _policy(uint24(MAX_TICK + 1), 10, 31 days, 30 days, 0, 0));
+        _rejectEconomicPolicy(fresh, keccak256("sell-tick"), _policy(100, uint24(MAX_TICK + 1), 31 days, 30 days, 0, 0));
+        _rejectEconomicPolicy(fresh, keccak256("zero-tenor"), _policy(100, 10, 0, 30 days, 0, 0));
+        _rejectEconomicPolicy(fresh, keccak256("zero-expiry"), _policy(100, 10, 31 days, 0, 0, 0));
+        _rejectEconomicPolicy(fresh, keccak256("horizon"), _policy(100, 10, 31 days, 31 days + 1, 0, 0));
+        _rejectEconomicPolicy(
+            fresh, keccak256("continuous-fee"), _policy(100, 10, 31 days, 30 days, uint32(MAX_CONTINUOUS_FEE + 1), 0)
+        );
+        _rejectEconomicPolicy(
+            fresh,
+            keccak256("settlement-fee"),
+            _policy(100, 10, 31 days, 30 days, 0, uint64(MAX_SETTLEMENT_FEE_360_DAYS + 1))
+        );
     }
 
     function testTighteningEnforcesAllFieldsAndSentinelAuthorization() public {
@@ -436,13 +434,13 @@ contract BlueMidnightAdapterAccountingTest is Test {
         assertGt(adapter.policyEpoch(), before);
         uint64 tightenedEpoch = adapter.policyEpoch();
 
-        MarketEconomicPolicy memory mixed = tighter;
-        mixed.maxSettlementFeeWad = 20;
-        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
-        adapter.tightenMarketEconomicPolicy(midnightId, mixed);
-        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
-        adapter.tightenMarketEconomicPolicy(midnightId, tighter);
-        assertEq(adapter.policyEpoch(), tightenedEpoch);
+        _assertTighteningRejected(_policy(100, 11, 30 days, 29 days, 9, 19), tightenedEpoch);
+        _assertTighteningRejected(_policy(99, 10, 30 days, 29 days, 9, 19), tightenedEpoch);
+        _assertTighteningRejected(_policy(99, 11, 31 days, 29 days, 9, 19), tightenedEpoch);
+        _assertTighteningRejected(_policy(99, 11, 30 days, 30 days, 9, 19), tightenedEpoch);
+        _assertTighteningRejected(_policy(99, 11, 30 days, 29 days, 10, 19), tightenedEpoch);
+        _assertTighteningRejected(_policy(99, 11, 30 days, 29 days, 9, 20), tightenedEpoch);
+        _assertTighteningRejected(_policy(99, 11, 30 days, 29 days, 9, 19), tightenedEpoch);
     }
 
     function testMakerSellTickAndExactOneCapBoundaries() public {

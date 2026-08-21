@@ -305,14 +305,31 @@ contract BlueMidnightAdapterAccountingTest is Test {
     }
 
     function testActualPartialFillsExhaustMarketAndGlobalExposureCaps() public {
+        bytes memory marketData =
+            abi.encodeWithSelector(adapter.setMarketPolicy.selector, midnightId, 800_000, 1_000_000, true);
+        adapter.submit(marketData);
+        vm.warp(adapter.executableAt(marketData));
+        adapter.setMarketPolicy(midnightId, 800_000, 1_000_000, true);
+
         midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 600_000, 600_000, 0);
-        assertEq(adapter.buyerAssetsBound(midnightId), 400_000);
+        assertEq(adapter.buyerAssetsBound(midnightId), 200_000);
 
         vm.expectRevert(BlueMidnightAdapter.ExposureExceeded.selector);
-        midnight.invokeBuy(adapter, midnightId, midnightMarket, 400_001, 400_001, 0, address(adapter), "");
+        midnight.invokeBuy(adapter, midnightId, midnightMarket, 200_001, 200_001, 0, address(adapter), "");
 
-        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 400_000, 400_000, 0);
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 200_000, 200_000, 0);
         assertEq(adapter.buyerAssetsBound(midnightId), 0);
+
+        Market memory secondMarket = midnightMarket;
+        secondMarket.maturity += 1 days;
+        bytes32 secondId = HashLib.hashMarket(secondMarket);
+        _setEconomicPolicy(adapter, secondId, _policy(100, 10, 31 days, 30 days, 0, 0));
+        _enableMarket(adapter, secondId);
+        midnight.takeMakerBuy(adapter, secondId, secondMarket, 200_000, 200_000, 0);
+        assertEq(adapter.buyerAssetsBound(secondId), 0);
+
+        vm.expectRevert(BlueMidnightAdapter.ExposureExceeded.selector);
+        midnight.invokeBuy(adapter, secondId, secondMarket, 1, 1, 0, address(adapter), "");
     }
 
     function testOfferBindsEpochGroupAndSellInventory() public {

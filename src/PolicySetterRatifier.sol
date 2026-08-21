@@ -31,6 +31,7 @@ contract PolicySetterRatifier is IPolicySetterRatifier {
         }
         approvedAtEpoch[maker][root] = epoch;
         emit RootApprovalUpdated(maker, root, epoch, approved);
+        emit SetIsRootRatified(msg.sender, maker, root, approved);
     }
 
     /// @dev Compatibility spelling for upstream callers; it retains maker-only semantics.
@@ -40,16 +41,39 @@ contract PolicySetterRatifier is IPolicySetterRatifier {
 
     function isRatified(Offer calldata offer, bytes calldata ratifierData, address) external view returns (bytes32) {
         if (msg.sender != MIDNIGHT) revert UnauthorizedCaller();
-        if (ratifierData.length < 96) revert MalformedRatifierData();
+        _validateRatifierData(ratifierData);
         (bytes32 root, uint256 leafIndex, bytes32[] memory proof) =
             abi.decode(ratifierData, (bytes32, uint256, bytes32[]));
+        if (leafIndex >> proof.length != 0) revert InvalidProof();
         if (!HashLib.isLeaf(root, HashLib.hashOffer(offer), leafIndex, proof)) revert InvalidProof();
 
         uint64 epoch = _policyEpoch(offer.maker);
         if (epoch == 0 || approvedAtEpoch[offer.maker][root] != epoch) revert RootNotApproved();
         if (offer.maker.code.length == 0) revert InvalidPolicyProvider();
-        if (!IOfferPolicy(offer.maker).acceptsOffer(offer)) revert OfferRejected();
+        bool accepted;
+        try IOfferPolicy(offer.maker).acceptsOffer(offer) returns (bool result) {
+            accepted = result;
+        } catch {
+            revert InvalidPolicyProvider();
+        }
+        if (!accepted) revert OfferRejected();
         return CALLBACK_SUCCESS;
+    }
+
+    function _validateRatifierData(bytes calldata ratifierData) internal pure {
+        uint256 length = ratifierData.length;
+        if (length < 128) revert MalformedRatifierData();
+        uint256 offset;
+        uint256 proofLength;
+        assembly ("memory-safe") {
+            offset := calldataload(add(ratifierData.offset, 0x40))
+        }
+        if (offset != 96 || offset > length - 32) revert MalformedRatifierData();
+        assembly ("memory-safe") {
+            proofLength := calldataload(add(ratifierData.offset, offset))
+        }
+        if (proofLength > (length - offset - 32) / 32) revert MalformedRatifierData();
+        if (offset + 32 + proofLength * 32 != length) revert MalformedRatifierData();
     }
 
     function _policyEpoch(address maker) internal view returns (uint64 epoch) {

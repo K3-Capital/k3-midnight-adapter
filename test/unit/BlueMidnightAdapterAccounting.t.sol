@@ -402,7 +402,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
             address(adapter),
             "",
             address(0),
-            address(0x4444),
+            adapter.ratifier(),
             false,
             0,
             100,

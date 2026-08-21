@@ -7,10 +7,10 @@ import {SafeERC20Lib} from "vault-v2/libraries/SafeERC20Lib.sol";
 import {IMorpho, Market, MarketParams, Position, Id} from "morpho-blue/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "morpho-blue/libraries/MarketParamsLib.sol";
 import {SharesMathLib} from "morpho-blue/libraries/SharesMathLib.sol";
-import {BlueMarketConfig, MarketAccounting} from "./types/AdapterTypes.sol";
+import {BlueMarketConfig, MarketAccounting, MarketEconomicPolicy} from "./types/AdapterTypes.sol";
 import {IBlueMidnightAdapter} from "./interfaces/IBlueMidnightAdapter.sol";
 import {IMidnight, Market as MidnightMarket, Offer} from "midnight/interfaces/IMidnight.sol";
-import {CALLBACK_SUCCESS, MAX_CONTINUOUS_FEE} from "midnight/libraries/ConstantsLib.sol";
+import {CALLBACK_SUCCESS, MAX_CONTINUOUS_FEE, MAX_SETTLEMENT_FEE_360_DAYS} from "midnight/libraries/ConstantsLib.sol";
 import {MAX_TICK} from "midnight/libraries/TickLib.sol";
 import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
 
@@ -56,6 +56,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     event BuyFill(bytes32 indexed marketId, uint256 assets, uint256 units, uint256 bookValue);
     event SellFill(bytes32 indexed marketId, uint256 assets, uint256 units, int256 pnl);
     event MarketPolicySet(bytes32 indexed marketId, uint256 maxExposure, uint256 maxAssets, bool enabled);
+    event MarketEconomicPolicySet(bytes32 indexed marketId, MarketEconomicPolicy policy, bool immediate);
 
     address public immutable factory;
     address public immutable parentVault;
@@ -84,6 +85,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     mapping(bytes32 marketId => bool) public marketEnabled;
     mapping(bytes32 marketId => uint256) public marketExposureCap;
     mapping(bytes32 marketId => uint256) public marketAssetCap;
+    mapping(bytes32 marketId => MarketEconomicPolicy) public marketEconomicPolicy;
     mapping(bytes32 marketId => bytes) internal encodedMidnightMarket;
 
     constructor(address _parentVault, address _midnight, address _morphoBlue, address _ratifier) {
@@ -102,6 +104,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         timelock[bytes4(keccak256("setQuoter(address,bool)"))] = 2 days;
         timelock[bytes4(keccak256("setMaxActiveMarkets(uint256)"))] = 2 days;
         timelock[bytes4(keccak256("setMarketPolicy(bytes32,uint256,uint256,bool)"))] = 2 days;
+        timelock[
+            bytes4(keccak256("setMarketEconomicPolicy(bytes32,(uint24,uint24,uint40,uint40,uint32,uint64,bool))"))
+        ] = 2 days;
         SafeERC20Lib.safeApprove(asset, _morphoBlue, type(uint256).max);
         SafeERC20Lib.safeApprove(asset, _parentVault, type(uint256).max);
     }
@@ -222,7 +227,10 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         onlyCurator
     {
         _timelocked();
-        if (marketId == bytes32(0) || (enabled && (exposureCap == 0 || assetCap == 0))) revert InvalidValue();
+        if (
+            marketId == bytes32(0)
+                || (enabled && (exposureCap == 0 || assetCap == 0 || !marketEconomicPolicy[marketId].configured))
+        ) revert InvalidValue();
         marketExposureCap[marketId] = exposureCap;
         marketAssetCap[marketId] = assetCap;
         marketEnabled[marketId] = enabled;
@@ -230,6 +238,41 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         else if (accounting[marketId].trackedCredit == 0) _removeActiveMarket(marketId);
         _bumpEpoch(enabled ? bytes32("market-enable") : bytes32("market-disable"));
         emit MarketPolicySet(marketId, exposureCap, assetCap, enabled);
+    }
+
+    /// @notice Sets a per-Midnight-market economic policy after the curator timelock.
+    /// @dev This is required for initial configuration and any loosening of economic limits.
+    function setMarketEconomicPolicy(bytes32 marketId, MarketEconomicPolicy calldata policy) external onlyCurator {
+        _timelocked();
+        _validateEconomicPolicy(marketId, policy);
+        marketEconomicPolicy[marketId] = policy;
+        _bumpEpoch("economic-policy-set");
+        emit MarketEconomicPolicySet(marketId, policy, false);
+    }
+
+    /// @notice Allows the curator or sentinel to immediately make a configured market strictly safer.
+    function tightenMarketEconomicPolicy(bytes32 marketId, MarketEconomicPolicy calldata policy)
+        external
+        onlyCuratorOrSentinel
+    {
+        MarketEconomicPolicy memory current = marketEconomicPolicy[marketId];
+        if (!current.configured) revert InvalidValue();
+        _validateEconomicPolicy(marketId, policy);
+        if (
+            policy.maxBuyTick > current.maxBuyTick || policy.minSellTick < current.minSellTick
+                || policy.maxTenor > current.maxTenor || policy.maxExpiryHorizon > current.maxExpiryHorizon
+                || policy.maxContinuousFeePerSecondWad > current.maxContinuousFeePerSecondWad
+                || policy.maxSettlementFeeWad > current.maxSettlementFeeWad
+        ) revert InvalidValue();
+        if (
+            policy.maxBuyTick == current.maxBuyTick && policy.minSellTick == current.minSellTick
+                && policy.maxTenor == current.maxTenor && policy.maxExpiryHorizon == current.maxExpiryHorizon
+                && policy.maxContinuousFeePerSecondWad == current.maxContinuousFeePerSecondWad
+                && policy.maxSettlementFeeWad == current.maxSettlementFeeWad
+        ) revert InvalidValue();
+        marketEconomicPolicy[marketId] = policy;
+        _bumpEpoch("economic-policy-tighten");
+        emit MarketEconomicPolicySet(marketId, policy, true);
     }
 
     function lowerExposureCaps(uint256 globalCap, uint256 marketCap) external onlySentinel {
@@ -372,18 +415,45 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
                 || offer.market.loanToken != asset
         ) return false;
         bytes32 marketId = HashLib.hashMarket(offer.market);
-        if (!marketEnabled[marketId] || offer.start > block.timestamp || offer.expiry < block.timestamp) return false;
-        if (offer.maxAssets == 0 || offer.maxUnits == 0 || offer.expiry <= offer.start) return false;
-        if (offer.expiry - offer.start > 30 days || offer.market.maturity <= offer.expiry) return false;
+        MarketEconomicPolicy memory policy = marketEconomicPolicy[marketId];
+        if (!marketEnabled[marketId] || !policy.configured || offer.start > block.timestamp) return false;
+        if (
+            offer.market.maturity <= block.timestamp || offer.expiry < block.timestamp
+                || offer.expiry >= offer.market.maturity
+        ) {
+            return false;
+        }
+        if (
+            offer.market.maturity - block.timestamp > policy.maxTenor
+                || offer.expiry - block.timestamp > policy.maxExpiryHorizon
+        ) return false;
         if (offer.tick > MAX_TICK || offer.continuousFeeCap > MAX_CONTINUOUS_FEE) return false;
         if (offer.group != keccak256(abi.encode(address(this), policyEpoch))) return false;
-        if (offer.maxAssets > marketAssetCap[marketId]) return false;
+        if (offer.continuousFeeCap > policy.maxContinuousFeePerSecondWad) return false;
         if (IMidnight(midnight).continuousFee(marketId) > offer.continuousFeeCap) return false;
-        if (offer.buy) {
-            return offer.receiverIfMakerIsSeller == address(0) && !offer.reduceOnly && offer.callbackData.length == 0;
+        if (
+            IMidnight(midnight).settlementFee(marketId, offer.market.maturity - block.timestamp)
+                > policy.maxSettlementFeeWad
+        ) {
+            return false;
         }
-        return offer.receiverIfMakerIsSeller == address(this) && offer.reduceOnly && offer.callbackData.length == 0
+        if (offer.buy) {
+            return offer.maxAssets > 0 && offer.maxUnits == 0 && offer.maxAssets <= marketAssetCap[marketId]
+                && offer.tick <= policy.maxBuyTick && offer.receiverIfMakerIsSeller == address(0) && !offer.reduceOnly
+                && offer.callbackData.length == 0;
+        }
+        return offer.maxAssets == 0 && offer.maxUnits > 0 && offer.tick >= policy.minSellTick
+            && offer.receiverIfMakerIsSeller == address(this) && offer.reduceOnly && offer.callbackData.length == 0
             && offer.maxUnits <= accounting[marketId].trackedCredit;
+    }
+
+    function _validateEconomicPolicy(bytes32 marketId, MarketEconomicPolicy calldata policy) internal pure {
+        if (
+            marketId == bytes32(0) || !policy.configured || policy.maxBuyTick > MAX_TICK
+                || policy.minSellTick > MAX_TICK || policy.maxTenor == 0 || policy.maxExpiryHorizon == 0
+                || policy.maxExpiryHorizon > policy.maxTenor || policy.maxContinuousFeePerSecondWad > MAX_CONTINUOUS_FEE
+                || policy.maxSettlementFeeWad > MAX_SETTLEMENT_FEE_360_DAYS
+        ) revert InvalidValue();
     }
 
     function onBuy(

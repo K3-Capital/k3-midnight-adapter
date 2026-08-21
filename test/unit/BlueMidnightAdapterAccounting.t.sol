@@ -7,6 +7,7 @@ import {MarketParams, Id} from "morpho-blue/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "morpho-blue/libraries/MarketParamsLib.sol";
 import {Market, Offer, CollateralParams} from "midnight/interfaces/IMidnight.sol";
 import {MarketAccounting} from "../../src/types/AdapterTypes.sol";
+import {MarketEconomicPolicy} from "../../src/types/AdapterTypes.sol";
 import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
 import {CALLBACK_SUCCESS} from "midnight/libraries/ConstantsLib.sol";
 
@@ -107,8 +108,20 @@ contract AccountingMorphoMock {
 }
 
 contract AccountingMidnightMock {
-    function continuousFee(bytes32) external pure returns (uint32) {
-        return 0;
+    uint32 public continuous;
+    uint64 public settlement;
+
+    function setFees(uint32 continuous_, uint64 settlement_) external {
+        continuous = continuous_;
+        settlement = settlement_;
+    }
+
+    function continuousFee(bytes32) external view returns (uint32) {
+        return continuous;
+    }
+
+    function settlementFee(bytes32, uint256) external view returns (uint64) {
+        return settlement;
     }
 
     function invokeBuy(
@@ -162,6 +175,20 @@ contract BlueMidnightAdapterAccountingTest is Test {
             address(0)
         );
         midnightId = HashLib.hashMarket(midnightMarket);
+        MarketEconomicPolicy memory economicPolicy = MarketEconomicPolicy({
+            maxBuyTick: 100,
+            minSellTick: 10,
+            maxTenor: 31 days,
+            maxExpiryHorizon: 30 days,
+            maxContinuousFeePerSecondWad: 0,
+            maxSettlementFeeWad: 0,
+            configured: true
+        });
+        bytes memory economicPolicyData =
+            abi.encodeWithSelector(adapter.setMarketEconomicPolicy.selector, midnightId, economicPolicy);
+        adapter.submit(economicPolicyData);
+        vm.warp(adapter.executableAt(economicPolicyData));
+        adapter.setMarketEconomicPolicy(midnightId, economicPolicy);
         bytes memory policyData =
             abi.encodeWithSelector(adapter.setMarketPolicy.selector, midnightId, 1_000_000, 1_000_000, true);
         adapter.submit(policyData);
@@ -200,7 +227,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
             address(0),
             address(0x4444),
             false,
-            100,
+            0,
             100,
             0
         );
@@ -213,6 +240,96 @@ contract BlueMidnightAdapterAccountingTest is Test {
         offer.receiverIfMakerIsSeller = address(adapter);
         offer.callbackData = "";
         offer.maxUnits = 101;
+        offer.maxAssets = 0;
         assertFalse(adapter.acceptsOffer(offer));
+    }
+
+    function testEconomicPolicyFixtureEnablesValidOffer() public {
+        Offer memory offer = Offer(
+            midnightMarket,
+            true,
+            address(adapter),
+            block.timestamp,
+            block.timestamp + 1 days,
+            10,
+            keccak256(abi.encode(address(adapter), adapter.policyEpoch())),
+            address(adapter),
+            "",
+            address(0),
+            address(0x4444),
+            false,
+            0,
+            100,
+            0
+        );
+
+        assertTrue(adapter.acceptsOffer(offer));
+    }
+
+    function _validBuyOffer() internal view returns (Offer memory) {
+        return Offer(
+            midnightMarket,
+            true,
+            address(adapter),
+            block.timestamp,
+            block.timestamp + 1 days,
+            10,
+            keccak256(abi.encode(address(adapter), adapter.policyEpoch())),
+            address(adapter),
+            "",
+            address(0),
+            address(0x4444),
+            false,
+            0,
+            100,
+            0
+        );
+    }
+
+    function testOfferPolicyEnforcesTickHorizonAndFeesAtBoundaries() public {
+        Offer memory offer = _validBuyOffer();
+        assertTrue(adapter.acceptsOffer(offer));
+        offer.tick = 101;
+        assertFalse(adapter.acceptsOffer(offer));
+        offer.tick = 100;
+        assertTrue(adapter.acceptsOffer(offer));
+        offer.market.maturity = block.timestamp + 31 days + 1;
+        assertFalse(adapter.acceptsOffer(offer));
+        offer = _validBuyOffer();
+        assertTrue(adapter.acceptsOffer(offer));
+        midnight.setFees(1, 0);
+        assertFalse(adapter.acceptsOffer(offer));
+        midnight.setFees(0, 1);
+        assertFalse(adapter.acceptsOffer(offer));
+    }
+
+    function testEnableBeforeEconomicPolicyReverts() public {
+        bytes32 unconfiguredId = keccak256("unconfigured-market");
+        BlueMidnightAdapter fresh =
+            new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(0x4444));
+        bytes memory data = abi.encodeWithSelector(fresh.setMarketPolicy.selector, unconfiguredId, 1, 1, true);
+        fresh.submit(data);
+        vm.warp(fresh.executableAt(data));
+        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
+        fresh.setMarketPolicy(unconfiguredId, 1, 1, true);
+    }
+
+    function testImmediateTighteningBumpsEpochAndRejectsLoosening() public {
+        uint64 before = adapter.policyEpoch();
+        MarketEconomicPolicy memory tighter = MarketEconomicPolicy({
+            maxBuyTick: 99,
+            minSellTick: 10,
+            maxTenor: 31 days,
+            maxExpiryHorizon: 30 days,
+            maxContinuousFeePerSecondWad: 0,
+            maxSettlementFeeWad: 0,
+            configured: true
+        });
+        adapter.tightenMarketEconomicPolicy(midnightId, tighter);
+        assertGt(adapter.policyEpoch(), before);
+        MarketEconomicPolicy memory looser = tighter;
+        looser.maxBuyTick = 100;
+        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
+        adapter.tightenMarketEconomicPolicy(midnightId, looser);
     }
 }

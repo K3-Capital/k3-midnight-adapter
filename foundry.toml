@@ -1,8 +1,9 @@
 [profile.default]
 solc_version = "0.8.34"
-evm_version = "cancun"
+evm_version = "osaka"
 optimizer = true
 optimizer_runs = 200
+via_ir = true
 libs = ["lib"]
 src = "src"
 out = "out"

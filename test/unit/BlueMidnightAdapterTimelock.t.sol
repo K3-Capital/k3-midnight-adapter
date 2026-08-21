@@ -68,4 +68,53 @@ contract BlueMidnightAdapterTimelockTest is Test {
         vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
         adapter.submit(abi.encodeWithSelector(SELECTOR, 100, 50));
     }
+
+    function testDecreaseTimelockUsesTargetSelectorDelay() public {
+        bytes memory data = abi.encodeWithSelector(adapter.decreaseTimelock.selector, SELECTOR, 0);
+        adapter.submit(data);
+        assertEq(adapter.executableAt(data), block.timestamp + 2 days);
+        vm.warp(adapter.executableAt(data));
+        adapter.decreaseTimelock(SELECTOR, 0);
+        assertEq(adapter.timelock(SELECTOR), 0);
+    }
+
+    function testSentinelCanLowerCapsRevokeQuoterAndEnterRiskOff() public {
+        bytes memory caps = abi.encodeWithSelector(SELECTOR, 100, 100);
+        adapter.submit(caps);
+        vm.warp(adapter.executableAt(caps));
+        adapter.setExposureCaps(100, 100);
+
+        bytes memory quoter = abi.encodeWithSelector(adapter.setQuoter.selector, address(this), true);
+        adapter.submit(quoter);
+        vm.warp(adapter.executableAt(quoter));
+        adapter.setQuoter(address(this), true);
+        assertTrue(adapter.isQuoter(address(this)));
+
+        vault.setSentinel(address(this), true);
+        uint64 before = adapter.policyEpoch();
+        adapter.lowerExposureCaps(0, 0);
+        adapter.revokeQuoter(address(this));
+        adapter.riskOff(bytes32("incident"));
+        assertEq(adapter.globalExposureCap(), 0);
+        assertEq(adapter.targetExposureCap(), 0);
+        assertFalse(adapter.isQuoter(address(this)));
+        assertTrue(adapter.riskOffActive());
+        assertGt(adapter.policyEpoch(), before);
+    }
+
+    function testActiveMarketSetIsBoundedAndO1Indexed() public {
+        bytes32 first = keccak256("first");
+        bytes32 second = keccak256("second");
+        vm.prank(address(4));
+        adapter.registerActiveMarket(first);
+        vm.prank(address(4));
+        adapter.registerActiveMarket(second);
+        assertEq(adapter.activeMarketIdsLength(), 2);
+        assertTrue(adapter.isActiveMarket(first));
+        vm.prank(address(4));
+        adapter.unregisterActiveMarket(first);
+        assertFalse(adapter.isActiveMarket(first));
+        assertTrue(adapter.isActiveMarket(second));
+        assertEq(adapter.activeMarketIdsLength(), 1);
+    }
 }

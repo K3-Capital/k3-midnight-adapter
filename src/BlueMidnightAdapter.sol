@@ -9,8 +9,9 @@ import {MarketParamsLib} from "morpho-blue/libraries/MarketParamsLib.sol";
 import {SharesMathLib} from "morpho-blue/libraries/SharesMathLib.sol";
 import {BlueMarketConfig, MarketAccounting} from "./types/AdapterTypes.sol";
 import {IBlueMidnightAdapter} from "./interfaces/IBlueMidnightAdapter.sol";
-import {Market as MidnightMarket, Offer} from "midnight/interfaces/IMidnight.sol";
-import {CALLBACK_SUCCESS} from "midnight/libraries/ConstantsLib.sol";
+import {IMidnight, Market as MidnightMarket, Offer} from "midnight/interfaces/IMidnight.sol";
+import {CALLBACK_SUCCESS, MAX_CONTINUOUS_FEE} from "midnight/libraries/ConstantsLib.sol";
+import {MAX_TICK} from "midnight/libraries/TickLib.sol";
 import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
 
 /// @title Blue Midnight adapter core
@@ -41,6 +42,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     error ExposureExceeded();
     error InsufficientCredit();
     error InvalidReceiver();
+    error AccountingOverflow();
 
     event Submit(bytes4 indexed selector, bytes data, uint256 executableAt);
     event Accept(bytes4 indexed selector, bytes data);
@@ -82,6 +84,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     mapping(bytes32 marketId => bool) public marketEnabled;
     mapping(bytes32 marketId => uint256) public marketExposureCap;
     mapping(bytes32 marketId => uint256) public marketAssetCap;
+    mapping(bytes32 marketId => bytes) internal encodedMidnightMarket;
 
     constructor(address _parentVault, address _midnight, address _morphoBlue, address _ratifier) {
         if (_parentVault == address(0) || _midnight == address(0) || _morphoBlue == address(0)) revert InvalidValue();
@@ -302,7 +305,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     function realAssets() external view returns (uint256) {
         uint256 value = IERC20(asset).balanceOf(address(this)) + expectedSupplyAssets();
         for (uint256 i; i < activeMarketIds.length; ++i) {
-            value += accounting[activeMarketIds[i]].bookValue;
+            value += _conservativeBookValue(activeMarketIds[i]);
         }
         return value;
     }
@@ -371,11 +374,15 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         bytes32 marketId = HashLib.hashMarket(offer.market);
         if (!marketEnabled[marketId] || offer.start > block.timestamp || offer.expiry < block.timestamp) return false;
         if (offer.maxAssets == 0 || offer.maxUnits == 0 || offer.expiry <= offer.start) return false;
+        if (offer.expiry - offer.start > 30 days || offer.market.maturity <= offer.expiry) return false;
+        if (offer.tick > MAX_TICK || offer.continuousFeeCap > MAX_CONTINUOUS_FEE) return false;
+        if (offer.group != keccak256(abi.encode(address(this), policyEpoch))) return false;
         if (offer.maxAssets > marketAssetCap[marketId]) return false;
         if (offer.buy) {
-            return offer.receiverIfMakerIsSeller == address(0) && !offer.reduceOnly && offer.callbackData.length == 0;
+            return offer.receiverIfMakerIsSeller == address(0) && !offer.reduceOnly;
         }
-        return offer.receiverIfMakerIsSeller == address(this) && offer.reduceOnly && offer.callbackData.length == 0;
+        return offer.receiverIfMakerIsSeller == address(this) && offer.reduceOnly && offer.callbackData.length == 0
+            && offer.maxUnits <= accounting[marketId].trackedCredit;
     }
 
     function onBuy(
@@ -398,19 +405,23 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             accounting[id].trackedCredit > marketExposureCap[id]
                 || units > marketExposureCap[id] - accounting[id].trackedCredit
         ) revert ExposureExceeded();
-        MarketParams memory params = abi.decode(data, (MarketParams));
-        if (params.loanToken != asset || Id.unwrap(params.id()) != blue.marketId) revert InvalidMarket();
+        // Blue routing is adapter-owned: Midnight forwards offer callback data, but it can never select a Blue market.
+        // The configured market is the sole source of routing truth.
+        data;
+        if (!blueMarketConfigured) revert InvalidMarket();
         if (buyerAssets != 0) {
-            (uint256 withdrawn,) = IMorpho(morphoBlue).withdraw(params, buyerAssets, 0, address(this), address(this));
+            (uint256 withdrawn,) =
+                IMorpho(morphoBlue).withdraw(blue.market, buyerAssets, 0, address(this), address(this));
             if (withdrawn != buyerAssets) revert InsufficientLiquidity();
             SafeERC20Lib.safeApprove(asset, midnight, 0);
             SafeERC20Lib.safeApprove(asset, midnight, buyerAssets);
         }
         MarketAccounting storage a = accounting[id];
-        a.bookValue += uint128(buyerAssets);
-        a.netMaturityClaim += uint128(buyerAssets + pendingFeeIncrease);
-        a.trackedCredit += uint128(units);
+        a.bookValue = _toUint128(uint256(a.bookValue) + buyerAssets);
+        a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) + buyerAssets + pendingFeeIncrease);
+        a.trackedCredit = _toUint128(uint256(a.trackedCredit) + units);
         a.active = true;
+        encodedMidnightMarket[id] = abi.encode(market);
         _addActiveMarket(id);
         emit BuyFill(id, buyerAssets, units, a.bookValue);
         return CALLBACK_SUCCESS;
@@ -436,9 +447,10 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (units > a.trackedCredit || a.trackedCredit == 0) revert InsufficientCredit();
         uint256 oldBook = a.bookValue;
         uint256 reduction = oldBook * units / a.trackedCredit;
-        a.bookValue -= uint128(reduction);
-        a.netMaturityClaim -= uint128(a.netMaturityClaim * units / a.trackedCredit);
-        a.trackedCredit -= uint128(units);
+        a.bookValue = _toUint128(uint256(a.bookValue) - reduction);
+        a.netMaturityClaim =
+            _toUint128(uint256(a.netMaturityClaim) - uint256(a.netMaturityClaim) * units / a.trackedCredit);
+        a.trackedCredit = _toUint128(uint256(a.trackedCredit) - units);
         int256 pnl = int256(sellerAssets) - int256(reduction);
         if (sellerAssets != 0) {
             (uint256 supplied,) = IMorpho(morphoBlue).supply(blue.market, sellerAssets, 0, address(this), hex"");
@@ -458,11 +470,31 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (block.timestamp > checkpoint && a.netMaturityClaim > a.bookValue && market.maturity > checkpoint) {
             uint256 elapsed = (block.timestamp < market.maturity ? block.timestamp : market.maturity) - checkpoint;
             uint256 duration = market.maturity - checkpoint;
-            a.bookValue += uint128((a.netMaturityClaim - a.bookValue) * elapsed / duration);
+            a.bookValue = _toUint128(uint256(a.bookValue) + (a.netMaturityClaim - a.bookValue) * elapsed / duration);
         }
         if (feeDecrease >= a.netMaturityClaim) a.netMaturityClaim = 0;
-        else a.netMaturityClaim -= uint128(feeDecrease);
+        else a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) - feeDecrease);
         a.lastCheckpoint = uint40(block.timestamp < market.maturity ? block.timestamp : market.maturity);
+    }
+
+    function _conservativeBookValue(bytes32 id) internal view returns (uint256) {
+        MarketAccounting memory a = accounting[id];
+        if (!a.active || a.trackedCredit == 0 || encodedMidnightMarket[id].length == 0) return a.bookValue;
+        MidnightMarket memory market = abi.decode(encodedMidnightMarket[id], (MidnightMarket));
+        (uint128 credit, uint128 pendingFee,) = IMidnight(midnight).updatePositionView(market, id, address(this));
+        uint256 claim = uint256(credit) + uint256(pendingFee);
+        uint256 synchronizedClaim = claim < a.netMaturityClaim ? claim : a.netMaturityClaim;
+        uint256 accrued = a.bookValue;
+        if (block.timestamp > a.lastCheckpoint && market.maturity > a.lastCheckpoint && synchronizedClaim > accrued) {
+            uint256 end = block.timestamp < market.maturity ? block.timestamp : market.maturity;
+            accrued += (synchronizedClaim - accrued) * (end - a.lastCheckpoint) / (market.maturity - a.lastCheckpoint);
+        }
+        return accrued < synchronizedClaim ? accrued : synchronizedClaim;
+    }
+
+    function _toUint128(uint256 value) internal pure returns (uint128) {
+        if (value > type(uint128).max) revert AccountingOverflow();
+        return uint128(value);
     }
 
     function _ids() internal view returns (bytes32[] memory result) {

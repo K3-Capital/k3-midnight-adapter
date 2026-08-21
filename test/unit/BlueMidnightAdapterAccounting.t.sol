@@ -107,6 +107,10 @@ contract AccountingMorphoMock {
 }
 
 contract AccountingMidnightMock {
+    function continuousFee(bytes32) external pure returns (uint32) {
+        return 0;
+    }
+
     function invokeBuy(
         BlueMidnightAdapter adapter,
         bytes32 id,
@@ -172,8 +176,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
     }
 
     function testBuyUsesConfiguredBlueMarketAndPreservesNav() public {
-        bytes32 result =
-            midnight.invokeBuy(adapter, midnightId, midnightMarket, 100, 100, 0, address(adapter), hex"deadbeef");
+        bytes32 result = midnight.invokeBuy(adapter, midnightId, midnightMarket, 100, 100, 0, address(adapter), "");
         assertEq(result, CALLBACK_SUCCESS);
         MarketAccounting memory a = adapter.marketAccounting(midnightId);
         assertEq(a.bookValue, 100);
@@ -193,7 +196,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
             10,
             keccak256(abi.encode(address(adapter), adapter.policyEpoch())),
             address(adapter),
-            hex"deadbeef",
+            "",
             address(0),
             address(0x4444),
             false,

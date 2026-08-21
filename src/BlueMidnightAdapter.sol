@@ -378,8 +378,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (offer.tick > MAX_TICK || offer.continuousFeeCap > MAX_CONTINUOUS_FEE) return false;
         if (offer.group != keccak256(abi.encode(address(this), policyEpoch))) return false;
         if (offer.maxAssets > marketAssetCap[marketId]) return false;
+        if (IMidnight(midnight).continuousFee(marketId) > offer.continuousFeeCap) return false;
         if (offer.buy) {
-            return offer.receiverIfMakerIsSeller == address(0) && !offer.reduceOnly;
+            return offer.receiverIfMakerIsSeller == address(0) && !offer.reduceOnly && offer.callbackData.length == 0;
         }
         return offer.receiverIfMakerIsSeller == address(this) && offer.reduceOnly && offer.callbackData.length == 0
             && offer.maxUnits <= accounting[marketId].trackedCredit;
@@ -405,9 +406,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             accounting[id].trackedCredit > marketExposureCap[id]
                 || units > marketExposureCap[id] - accounting[id].trackedCredit
         ) revert ExposureExceeded();
-        // Blue routing is adapter-owned: Midnight forwards offer callback data, but it can never select a Blue market.
-        // The configured market is the sole source of routing truth.
-        data;
+        // The adapter has exactly one configured Blue route. Empty data is pinned so the offer cannot carry an
+        // alternate routing payload that might diverge from the policy predicate.
+        if (data.length != 0) revert InvalidCallback();
         if (!blueMarketConfigured) revert InvalidMarket();
         if (buyerAssets != 0) {
             (uint256 withdrawn,) =
@@ -466,6 +467,17 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
 
     function _checkpoint(bytes32 id, MidnightMarket memory market, uint256 feeDecrease) internal {
         MarketAccounting storage a = accounting[id];
+        if (a.active && a.trackedCredit != 0) {
+            (uint128 credit, uint128 pendingFee,) = IMidnight(midnight).updatePositionView(market, id, address(this));
+            if (credit < a.trackedCredit) {
+                uint256 oldCredit = a.trackedCredit;
+                a.bookValue = _toUint128(uint256(a.bookValue) * credit / oldCredit);
+                a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) * credit / oldCredit);
+                a.trackedCredit = credit;
+            }
+            uint256 currentClaim = uint256(credit) + pendingFee;
+            if (currentClaim < a.netMaturityClaim) a.netMaturityClaim = _toUint128(currentClaim);
+        }
         uint256 checkpoint = a.lastCheckpoint == 0 ? block.timestamp : a.lastCheckpoint;
         if (block.timestamp > checkpoint && a.netMaturityClaim > a.bookValue && market.maturity > checkpoint) {
             uint256 elapsed = (block.timestamp < market.maturity ? block.timestamp : market.maturity) - checkpoint;

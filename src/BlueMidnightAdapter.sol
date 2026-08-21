@@ -7,8 +7,11 @@ import {SafeERC20Lib} from "vault-v2/libraries/SafeERC20Lib.sol";
 import {IMorpho, Market, MarketParams, Position, Id} from "morpho-blue/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "morpho-blue/libraries/MarketParamsLib.sol";
 import {SharesMathLib} from "morpho-blue/libraries/SharesMathLib.sol";
-import {BlueMarketConfig} from "./types/AdapterTypes.sol";
+import {BlueMarketConfig, MarketAccounting} from "./types/AdapterTypes.sol";
 import {IBlueMidnightAdapter} from "./interfaces/IBlueMidnightAdapter.sol";
+import {Market as MidnightMarket, Offer} from "midnight/interfaces/IMidnight.sol";
+import {CALLBACK_SUCCESS} from "midnight/libraries/ConstantsLib.sol";
+import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
 
 /// @title Blue Midnight adapter core
 /// @notice The Stage 3, single-market productive sleeve for a Vault V2 adapter.
@@ -32,6 +35,12 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     error InsufficientLiquidity();
     error UnsupportedData();
     error RiskOff();
+    error InvalidCallback();
+    error InvalidOffer();
+    error MarketDisabled();
+    error ExposureExceeded();
+    error InsufficientCredit();
+    error InvalidReceiver();
 
     event Submit(bytes4 indexed selector, bytes data, uint256 executableAt);
     event Accept(bytes4 indexed selector, bytes data);
@@ -42,6 +51,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     event ExposureCapsSet(uint256 globalCap, uint256 marketCap);
     event Allocate(bytes32 indexed marketId, uint256 assets, uint256 shares);
     event Deallocate(bytes32 indexed marketId, uint256 assets, uint256 shares);
+    event BuyFill(bytes32 indexed marketId, uint256 assets, uint256 units, uint256 bookValue);
+    event SellFill(bytes32 indexed marketId, uint256 assets, uint256 units, int256 pnl);
+    event MarketPolicySet(bytes32 indexed marketId, uint256 maxExposure, uint256 maxAssets, bool enabled);
 
     address public immutable factory;
     address public immutable parentVault;
@@ -66,6 +78,10 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     bytes4 internal constant DECREASE_TIMELOCK_SELECTOR = bytes4(keccak256("decreaseTimelock(bytes4,uint256)"));
     bytes32[] internal activeMarketIds;
     mapping(bytes32 marketId => uint256 indexPlusOne) internal activeMarketIndex;
+    mapping(bytes32 marketId => MarketAccounting) internal accounting;
+    mapping(bytes32 marketId => bool) public marketEnabled;
+    mapping(bytes32 marketId => uint256) public marketExposureCap;
+    mapping(bytes32 marketId => uint256) public marketAssetCap;
 
     constructor(address _parentVault, address _midnight, address _morphoBlue, address _ratifier) {
         if (_parentVault == address(0) || _midnight == address(0) || _morphoBlue == address(0)) revert InvalidValue();
@@ -82,6 +98,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         timelock[bytes4(keccak256("setExposureCaps(uint256,uint256)"))] = 2 days;
         timelock[bytes4(keccak256("setQuoter(address,bool)"))] = 2 days;
         timelock[bytes4(keccak256("setMaxActiveMarkets(uint256)"))] = 2 days;
+        timelock[bytes4(keccak256("setMarketPolicy(bytes32,uint256,uint256,bool)"))] = 2 days;
         SafeERC20Lib.safeApprove(asset, _morphoBlue, type(uint256).max);
         SafeERC20Lib.safeApprove(asset, _parentVault, type(uint256).max);
     }
@@ -167,6 +184,20 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         emit QuoterSet(quoter, enabled);
     }
 
+    function approveRoot(bytes32 root) external {
+        if (!isQuoter[msg.sender] || root == bytes32(0)) revert Unauthorized();
+        (bool success,) =
+            ratifier.call(abi.encodeWithSignature("setRoot(address,bytes32,bool)", address(this), root, true));
+        if (!success) revert InvalidCallback();
+    }
+
+    function revokeRoot(bytes32 root) external {
+        if (!isQuoter[msg.sender] || root == bytes32(0)) revert Unauthorized();
+        (bool success,) =
+            ratifier.call(abi.encodeWithSignature("setRoot(address,bytes32,bool)", address(this), root, false));
+        if (!success) revert InvalidCallback();
+    }
+
     function setExposureCaps(uint256 globalCap, uint256 marketCap) external onlyCurator {
         _timelocked();
         if (globalCap < globalExposureCap || marketCap < targetExposureCap) revert ExposureLimit();
@@ -181,6 +212,21 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (newMax < maxActiveMarkets || newMax > 128) revert ActiveMarketLimit();
         maxActiveMarkets = newMax;
         _bumpEpoch("active-market-increase");
+    }
+
+    function setMarketPolicy(bytes32 marketId, uint256 exposureCap, uint256 assetCap, bool enabled)
+        external
+        onlyCurator
+    {
+        _timelocked();
+        if (marketId == bytes32(0) || (enabled && (exposureCap == 0 || assetCap == 0))) revert InvalidValue();
+        marketExposureCap[marketId] = exposureCap;
+        marketAssetCap[marketId] = assetCap;
+        marketEnabled[marketId] = enabled;
+        if (enabled) _addActiveMarket(marketId);
+        else if (accounting[marketId].trackedCredit == 0) _removeActiveMarket(marketId);
+        _bumpEpoch(enabled ? bytes32("market-enable") : bytes32("market-disable"));
+        emit MarketPolicySet(marketId, exposureCap, assetCap, enabled);
     }
 
     function lowerExposureCaps(uint256 globalCap, uint256 marketCap) external onlySentinel {
@@ -254,7 +300,11 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     }
 
     function realAssets() external view returns (uint256) {
-        return IERC20(asset).balanceOf(address(this)) + expectedSupplyAssets();
+        uint256 value = IERC20(asset).balanceOf(address(this)) + expectedSupplyAssets();
+        for (uint256 i; i < activeMarketIds.length; ++i) {
+            value += accounting[activeMarketIds[i]].bookValue;
+        }
+        return value;
     }
 
     function expectedSupplyAssets() public view returns (uint256) {
@@ -280,20 +330,139 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         return cash < available ? cash : available;
     }
 
-    function buyerAssetsBound(bytes32) public view returns (uint256) {
+    function buyerAssetsBound(bytes32 midnightMarketId) public view returns (uint256) {
         uint256 bound = expectedSupplyAssets();
         uint256 liquidity = blueAvailableLiquidity();
         if (bound > liquidity) bound = liquidity;
         uint256 exposure = _exposureCapacity();
+        uint256 marketCapacity = type(uint256).max;
+        if (midnightMarketId != bytes32(0) && marketExposureCap[midnightMarketId] != 0) {
+            marketCapacity = marketExposureCap[midnightMarketId] > accounting[midnightMarketId].trackedCredit
+                ? marketExposureCap[midnightMarketId] - accounting[midnightMarketId].trackedCredit
+                : 0;
+        }
+        if (exposure > marketCapacity) exposure = marketCapacity;
         if (bound > exposure) bound = exposure;
         return bound;
     }
 
     function _exposureCapacity() internal view returns (uint256) {
-        uint256 current = 0; // Stage 4 accounts Midnight positions; Stage 3 has no term exposure yet.
+        uint256 current;
+        for (uint256 i; i < activeMarketIds.length; ++i) {
+            current += accounting[activeMarketIds[i]].trackedCredit;
+        }
         if (riskOffActive || globalExposureCap == 0 || targetExposureCap == 0) return 0;
         uint256 capacity = globalExposureCap < targetExposureCap ? globalExposureCap : targetExposureCap;
         return capacity > current ? capacity - current : 0;
+    }
+
+    function marketAccounting(bytes32 marketId) external view returns (MarketAccounting memory) {
+        return accounting[marketId];
+    }
+
+    function acceptsOffer(Offer calldata offer) external view returns (bool) {
+        if (offer.maker != address(this) || offer.ratifier != ratifier || offer.callback != address(this)) {
+            return false;
+        }
+        if (
+            offer.market.midnight != midnight || offer.market.chainId != block.chainid
+                || offer.market.loanToken != asset
+        ) return false;
+        bytes32 marketId = HashLib.hashMarket(offer.market);
+        if (!marketEnabled[marketId] || offer.start > block.timestamp || offer.expiry < block.timestamp) return false;
+        if (offer.maxAssets == 0 || offer.maxUnits == 0 || offer.expiry <= offer.start) return false;
+        if (offer.maxAssets > marketAssetCap[marketId]) return false;
+        if (offer.buy) {
+            return offer.receiverIfMakerIsSeller == address(0) && !offer.reduceOnly && offer.callbackData.length == 0;
+        }
+        return offer.receiverIfMakerIsSeller == address(this) && offer.reduceOnly && offer.callbackData.length == 0;
+    }
+
+    function onBuy(
+        bytes32 id,
+        MidnightMarket memory market,
+        uint256 buyerAssets,
+        uint256 units,
+        uint256 pendingFeeIncrease,
+        address buyer,
+        bytes memory data
+    ) external returns (bytes32) {
+        if (msg.sender != midnight || buyer != address(this)) revert Unauthorized();
+        if (
+            id != HashLib.hashMarket(market) || !marketEnabled[id] || market.midnight != midnight
+                || market.loanToken != asset
+        ) revert InvalidOffer();
+        _checkpoint(id, market, 0);
+        if (riskOffActive || buyerAssets > buyerAssetsBound(id)) revert ExposureExceeded();
+        if (
+            accounting[id].trackedCredit > marketExposureCap[id]
+                || units > marketExposureCap[id] - accounting[id].trackedCredit
+        ) revert ExposureExceeded();
+        MarketParams memory params = abi.decode(data, (MarketParams));
+        if (params.loanToken != asset || Id.unwrap(params.id()) != blue.marketId) revert InvalidMarket();
+        if (buyerAssets != 0) {
+            (uint256 withdrawn,) = IMorpho(morphoBlue).withdraw(params, buyerAssets, 0, address(this), address(this));
+            if (withdrawn != buyerAssets) revert InsufficientLiquidity();
+            SafeERC20Lib.safeApprove(asset, midnight, 0);
+            SafeERC20Lib.safeApprove(asset, midnight, buyerAssets);
+        }
+        MarketAccounting storage a = accounting[id];
+        a.bookValue += uint128(buyerAssets);
+        a.netMaturityClaim += uint128(buyerAssets + pendingFeeIncrease);
+        a.trackedCredit += uint128(units);
+        a.active = true;
+        _addActiveMarket(id);
+        emit BuyFill(id, buyerAssets, units, a.bookValue);
+        return CALLBACK_SUCCESS;
+    }
+
+    function onSell(
+        bytes32 id,
+        MidnightMarket memory market,
+        uint256 sellerAssets,
+        uint256 units,
+        uint256 pendingFeeDecrease,
+        address seller,
+        address receiver,
+        bytes memory data
+    ) external returns (bytes32) {
+        if (msg.sender != midnight || seller != address(this) || receiver != address(this)) {
+            revert InvalidReceiver();
+        }
+        if (id != HashLib.hashMarket(market) || !marketEnabled[id] || market.loanToken != asset) revert InvalidOffer();
+        if (data.length != 0 || units == 0) revert InvalidCallback();
+        _checkpoint(id, market, pendingFeeDecrease);
+        MarketAccounting storage a = accounting[id];
+        if (units > a.trackedCredit || a.trackedCredit == 0) revert InsufficientCredit();
+        uint256 oldBook = a.bookValue;
+        uint256 reduction = oldBook * units / a.trackedCredit;
+        a.bookValue -= uint128(reduction);
+        a.netMaturityClaim -= uint128(a.netMaturityClaim * units / a.trackedCredit);
+        a.trackedCredit -= uint128(units);
+        int256 pnl = int256(sellerAssets) - int256(reduction);
+        if (sellerAssets != 0) {
+            (uint256 supplied,) = IMorpho(morphoBlue).supply(blue.market, sellerAssets, 0, address(this), hex"");
+            if (supplied != sellerAssets) revert InvalidCallback();
+        }
+        if (a.trackedCredit == 0) {
+            a.active = false;
+            if (!marketEnabled[id]) _removeActiveMarket(id);
+        }
+        emit SellFill(id, sellerAssets, units, pnl);
+        return CALLBACK_SUCCESS;
+    }
+
+    function _checkpoint(bytes32 id, MidnightMarket memory market, uint256 feeDecrease) internal {
+        MarketAccounting storage a = accounting[id];
+        uint256 checkpoint = a.lastCheckpoint == 0 ? block.timestamp : a.lastCheckpoint;
+        if (block.timestamp > checkpoint && a.netMaturityClaim > a.bookValue && market.maturity > checkpoint) {
+            uint256 elapsed = (block.timestamp < market.maturity ? block.timestamp : market.maturity) - checkpoint;
+            uint256 duration = market.maturity - checkpoint;
+            a.bookValue += uint128((a.netMaturityClaim - a.bookValue) * elapsed / duration);
+        }
+        if (feeDecrease >= a.netMaturityClaim) a.netMaturityClaim = 0;
+        else a.netMaturityClaim -= uint128(feeDecrease);
+        a.lastCheckpoint = uint40(block.timestamp < market.maturity ? block.timestamp : market.maturity);
     }
 
     function _ids() internal view returns (bytes32[] memory result) {

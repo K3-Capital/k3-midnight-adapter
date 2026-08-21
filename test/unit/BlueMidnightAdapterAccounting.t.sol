@@ -304,6 +304,17 @@ contract BlueMidnightAdapterAccountingTest is Test {
         assertEq(a.netMaturityClaim, 51);
     }
 
+    function testActualPartialFillsExhaustMarketAndGlobalExposureCaps() public {
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 600_000, 600_000, 0);
+        assertEq(adapter.buyerAssetsBound(midnightId), 400_000);
+
+        vm.expectRevert(BlueMidnightAdapter.ExposureExceeded.selector);
+        midnight.invokeBuy(adapter, midnightId, midnightMarket, 400_001, 400_001, 0, address(adapter), "");
+
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 400_000, 400_000, 0);
+        assertEq(adapter.buyerAssetsBound(midnightId), 0);
+    }
+
     function testOfferBindsEpochGroupAndSellInventory() public {
         Offer memory offer = Offer(
             midnightMarket,

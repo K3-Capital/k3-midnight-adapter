@@ -323,8 +323,13 @@ contract BlueMidnightAdapterAccountingTest is Test {
         Market memory secondMarket = midnightMarket;
         secondMarket.maturity += 1 days;
         bytes32 secondId = HashLib.hashMarket(secondMarket);
-        _setEconomicPolicy(adapter, secondId, _policy(100, 10, 31 days, 30 days, 0, 0));
+        _setEconomicPolicy(adapter, secondId, _policy(100, 10, 32 days, 30 days, 0, 0));
         _enableMarket(adapter, secondId);
+        Offer memory secondOffer = _validBuyOffer();
+        secondOffer.market = secondMarket;
+        secondOffer.expiry = block.timestamp + 1 days;
+        secondOffer.group = keccak256(abi.encode(address(adapter), adapter.policyEpoch()));
+        assertTrue(adapter.acceptsOffer(secondOffer));
         midnight.takeMakerBuy(adapter, secondId, secondMarket, 200_000, 200_000, 0);
         assertEq(adapter.buyerAssetsBound(secondId), 0);
 

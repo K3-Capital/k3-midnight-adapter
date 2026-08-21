@@ -116,6 +116,13 @@ contract AccountingMorphoMock {
 contract AccountingMidnightMock {
     uint32 public continuous;
     uint64 public settlement;
+    AccountingTokenMock immutable token;
+    mapping(bytes32 => uint128) public credit;
+    mapping(bytes32 => uint128) public pendingFee;
+
+    constructor(address token_) {
+        token = AccountingTokenMock(token_);
+    }
 
     function setFees(uint32 continuous_, uint64 settlement_) external {
         continuous = continuous_;
@@ -143,8 +150,47 @@ contract AccountingMidnightMock {
         return adapter.onBuy(id, market, assets, units, fee, buyer, data);
     }
 
-    function updatePositionView(Market calldata, bytes32, address) external pure returns (uint128, uint128, uint128) {
-        return (type(uint128).max, 0, 0);
+    function takeMakerBuy(
+        BlueMidnightAdapter adapter,
+        bytes32 id,
+        Market calldata market,
+        uint256 assets,
+        uint256 units,
+        uint256 fee
+    ) external returns (bytes32) {
+        bytes32 result = adapter.onBuy(id, market, assets, units, fee, address(adapter), "");
+        token.transferFrom(address(adapter), address(this), assets);
+        credit[id] += uint128(units);
+        pendingFee[id] += uint128(fee);
+        return result;
+    }
+
+    function takeMakerSell(
+        BlueMidnightAdapter adapter,
+        bytes32 id,
+        Market calldata market,
+        uint256 assets,
+        uint256 units,
+        uint256 feeDecrease
+    ) external returns (bytes32) {
+        credit[id] -= uint128(units);
+        uint256 balance = token.balanceOf(address(this));
+        if (assets > balance) token.mint(address(this), assets - balance);
+        token.transfer(address(adapter), assets);
+        return adapter.onSell(id, market, assets, units, feeDecrease, address(adapter), address(adapter), "");
+    }
+
+    function setPosition(bytes32 id, uint128 credit_, uint128 pendingFee_) external {
+        credit[id] = credit_;
+        pendingFee[id] = pendingFee_;
+    }
+
+    function updatePositionView(Market calldata, bytes32 id, address)
+        external
+        view
+        returns (uint128, uint128, uint128)
+    {
+        return (credit[id], pendingFee[id], 0);
     }
 }
 
@@ -163,7 +209,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
         token = new AccountingTokenMock();
         vault = new AccountingVaultMock(address(token));
         morpho = new AccountingMorphoMock(address(token));
-        midnight = new AccountingMidnightMock();
+        midnight = new AccountingMidnightMock(address(token));
         adapter = new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(0x4444));
         blueMarket = MarketParams(address(token), address(1), address(2), address(3), 0);
         bytes memory blueData = abi.encodeWithSelector(adapter.setBlueMarket.selector, blueMarket);
@@ -205,7 +251,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
         vm.warp(adapter.executableAt(capsData));
         adapter.setExposureCaps(1_000_000, 1_000_000);
         token.mint(address(morpho), 1_000_000);
-        morpho.setBalances(blueMarket.id(), 1_000_000, 1_000_000, 0, 1_000_000);
+        morpho.setBalances(blueMarket.id(), 1_000_000, 1_000_000_000_000, 0, 1_000_000_000_000);
     }
 
     function testBuyUsesConfiguredBlueMarketAndPreservesNav() public {
@@ -217,6 +263,24 @@ contract BlueMidnightAdapterAccountingTest is Test {
         // The view uses the current Midnight position as an upper bound, so a callback cannot double count the
         // withdrawn Blue assets as both Blue supply and Midnight credit.
         assertLe(adapter.realAssets(), 1_000_000);
+    }
+
+    function testStatefulBuyPullsAssetsAndSellResuppliesBlueWithoutNavDoubleCount() public {
+        uint256 initialNav = adapter.realAssets();
+
+        bytes32 buyResult = midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 0);
+        assertEq(buyResult, CALLBACK_SUCCESS);
+        assertEq(token.balanceOf(address(adapter)), 0);
+        assertEq(token.balanceOf(address(midnight)), 100);
+        assertEq(adapter.realAssets(), initialNav);
+
+        bytes32 sellResult = midnight.takeMakerSell(adapter, midnightId, midnightMarket, 110, 100, 0);
+        assertEq(sellResult, CALLBACK_SUCCESS);
+        assertEq(token.balanceOf(address(adapter)), 0);
+        assertEq(token.balanceOf(address(midnight)), 0);
+        // Morpho's virtual-share conversion rounds the mock's one-decimal gain down by one unit;
+        // the assertion still proves proceeds appear once in Blue rather than as duplicated adapter cash.
+        assertEq(adapter.realAssets(), initialNav + 9);
     }
 
     function testOfferBindsEpochGroupAndSellInventory() public {

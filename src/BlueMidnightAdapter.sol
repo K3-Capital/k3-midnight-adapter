@@ -470,7 +470,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             id != HashLib.hashMarket(market) || !marketEnabled[id] || market.midnight != midnight
                 || market.loanToken != asset
         ) revert InvalidOffer();
-        _checkpoint(id, market, 0);
+        _checkpoint(id, market, 0, 0);
         if (riskOffActive || buyerAssets > buyerAssetsBound(id)) revert ExposureExceeded();
         if (
             accounting[id].trackedCredit > marketExposureCap[id]
@@ -513,7 +513,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         }
         if (id != HashLib.hashMarket(market) || !marketEnabled[id] || market.loanToken != asset) revert InvalidOffer();
         if (data.length != 0 || units == 0) revert InvalidCallback();
-        _checkpoint(id, market, pendingFeeDecrease);
+        _checkpoint(id, market, pendingFeeDecrease, units);
         MarketAccounting storage a = accounting[id];
         if (units > a.trackedCredit || a.trackedCredit == 0) revert InsufficientCredit();
         uint256 oldBook = a.bookValue;
@@ -535,15 +535,16 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         return CALLBACK_SUCCESS;
     }
 
-    function _checkpoint(bytes32 id, MidnightMarket memory market, uint256 feeDecrease) internal {
+    function _checkpoint(bytes32 id, MidnightMarket memory market, uint256 feeDecrease, uint256 soldUnits) internal {
         MarketAccounting storage a = accounting[id];
         if (a.active && a.trackedCredit != 0) {
             (uint128 credit, uint128 pendingFee,) = IMidnight(midnight).updatePositionView(market, id, address(this));
-            if (credit < a.trackedCredit) {
+            uint256 preSaleCredit = uint256(credit) + soldUnits;
+            if (preSaleCredit < a.trackedCredit) {
                 uint256 oldCredit = a.trackedCredit;
-                a.bookValue = _toUint128(uint256(a.bookValue) * credit / oldCredit);
-                a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) * credit / oldCredit);
-                a.trackedCredit = credit;
+                a.bookValue = _toUint128(uint256(a.bookValue) * preSaleCredit / oldCredit);
+                a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) * preSaleCredit / oldCredit);
+                a.trackedCredit = _toUint128(preSaleCredit);
             }
             uint256 currentClaim = uint256(credit) + pendingFee;
             if (currentClaim < a.netMaturityClaim) a.netMaturityClaim = _toUint128(currentClaim);

@@ -2,7 +2,7 @@
 # Keep the repository free of generated Foundry artifacts and local secrets.
 out/
 cache/
- broadcast/
+broadcast/
 .env
 .env.*
 !.env.example

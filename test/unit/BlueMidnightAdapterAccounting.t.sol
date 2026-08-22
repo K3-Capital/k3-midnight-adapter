@@ -3,6 +3,8 @@ pragma solidity 0.8.34;
 
 import {Test} from "forge-std/Test.sol";
 import {BlueMidnightAdapter} from "../../src/BlueMidnightAdapter.sol";
+import {PolicySetterRatifier} from "../../src/PolicySetterRatifier.sol";
+import {IPolicySetterRatifier} from "../../src/interfaces/IPolicySetterRatifier.sol";
 import {MarketParams, Id} from "morpho-blue/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "morpho-blue/libraries/MarketParamsLib.sol";
 import {Market, Offer, CollateralParams} from "midnight/interfaces/IMidnight.sol";
@@ -117,11 +119,16 @@ contract AccountingMidnightMock {
     uint32 public continuous;
     uint64 public settlement;
     AccountingTokenMock immutable token;
+    PolicySetterRatifier public ratifier;
     mapping(bytes32 => uint128) public credit;
     mapping(bytes32 => uint128) public pendingFee;
 
     constructor(address token_) {
         token = AccountingTokenMock(token_);
+    }
+
+    function setRatifier(PolicySetterRatifier ratifier_) external {
+        ratifier = ratifier_;
     }
 
     function setFees(uint32 continuous_, uint64 settlement_) external {
@@ -148,6 +155,24 @@ contract AccountingMidnightMock {
         bytes calldata data
     ) external returns (bytes32) {
         return adapter.onBuy(id, market, assets, units, fee, buyer, data);
+    }
+
+    function takeMakerBuy(
+        BlueMidnightAdapter adapter,
+        Offer calldata offer,
+        bytes calldata ratifierData,
+        uint256 assets,
+        uint256 units,
+        uint256 fee
+    ) external returns (bytes32) {
+        ratifier.isRatified(offer, ratifierData, address(0));
+        require(assets <= offer.maxAssets, "offer asset limit");
+        bytes32 id = HashLib.hashMarket(offer.market);
+        bytes32 result = adapter.onBuy(id, offer.market, assets, units, fee, address(adapter), "");
+        token.transferFrom(address(adapter), address(this), assets);
+        credit[id] += uint128(units);
+        pendingFee[id] += uint128(fee);
+        return result;
     }
 
     function takeMakerBuy(
@@ -202,6 +227,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
     AccountingMorphoMock morpho;
     AccountingMidnightMock midnight;
     BlueMidnightAdapter adapter;
+    PolicySetterRatifier ratifier;
     MarketParams blueMarket;
     Market midnightMarket;
     bytes32 midnightId;
@@ -211,7 +237,9 @@ contract BlueMidnightAdapterAccountingTest is Test {
         vault = new AccountingVaultMock(address(token));
         morpho = new AccountingMorphoMock(address(token));
         midnight = new AccountingMidnightMock(address(token));
-        adapter = new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(0x4444));
+        ratifier = new PolicySetterRatifier(address(midnight));
+        adapter = new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(ratifier));
+        midnight.setRatifier(ratifier);
         blueMarket = MarketParams(address(token), address(1), address(2), address(3), 0);
         bytes memory blueData = abi.encodeWithSelector(adapter.setBlueMarket.selector, blueMarket);
         adapter.submit(blueData);
@@ -251,6 +279,10 @@ contract BlueMidnightAdapterAccountingTest is Test {
         adapter.submit(capsData);
         vm.warp(adapter.executableAt(capsData));
         adapter.setExposureCaps(1_000_000, 1_000_000);
+        bytes memory quoterData = abi.encodeWithSelector(adapter.setQuoter.selector, address(this), true);
+        adapter.submit(quoterData);
+        vm.warp(adapter.executableAt(quoterData));
+        adapter.setQuoter(address(this), true);
         token.mint(address(morpho), 1_000_000);
         morpho.setBalances(blueMarket.id(), 1_000_000, 1_000_000_000_000, 0, 1_000_000_000_000);
     }
@@ -282,6 +314,38 @@ contract BlueMidnightAdapterAccountingTest is Test {
         // Morpho's virtual-share conversion rounds the mock's one-decimal gain down by one unit;
         // the assertion still proves proceeds appear once in Blue rather than as duplicated adapter cash.
         assertEq(adapter.realAssets(), initialNav + 9);
+    }
+
+    function testTwoIndependentlyRatifiedOffersExecuteStatefulBuys() public {
+        Offer memory first = _validBuyOffer(100);
+        Offer memory second = _validBuyOffer(150);
+        second.expiry += 1;
+        bytes32 firstRoot = HashLib.hashOffer(first);
+        bytes32 secondRoot = HashLib.hashOffer(second);
+        adapter.approveRoot(firstRoot);
+        adapter.approveRoot(secondRoot);
+
+        bytes32 firstResult =
+            midnight.takeMakerBuy(adapter, first, abi.encode(firstRoot, 0, new bytes32[](0)), 100, 100, 0);
+        bytes32 secondResult =
+            midnight.takeMakerBuy(adapter, second, abi.encode(secondRoot, 0, new bytes32[](0)), 150, 150, 0);
+
+        assertEq(firstResult, CALLBACK_SUCCESS);
+        assertEq(secondResult, CALLBACK_SUCCESS);
+        assertEq(token.balanceOf(address(midnight)), 250);
+        assertEq(adapter.marketAccounting(midnightId).trackedCredit, 250);
+    }
+
+    function testStatefulBuyRejectsUnapprovedAndMismatchedRoots() public {
+        Offer memory offer = _validBuyOffer(100);
+        bytes32 root = HashLib.hashOffer(offer);
+        vm.expectRevert(IPolicySetterRatifier.RootNotApproved.selector);
+        midnight.takeMakerBuy(adapter, offer, abi.encode(root, 0, new bytes32[](0)), 100, 100, 0);
+
+        adapter.approveRoot(root);
+        bytes32 mismatchedRoot = keccak256("different-root");
+        vm.expectRevert(IPolicySetterRatifier.InvalidProof.selector);
+        midnight.takeMakerBuy(adapter, offer, abi.encode(mismatchedRoot, 0, new bytes32[](0)), 100, 100, 0);
     }
 
     function testPartialSellReducesClaimExactlyOnceAfterMidnightUpdatesCredit() public {
@@ -349,7 +413,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
             address(adapter),
             "",
             address(0),
-            address(0x4444),
+            adapter.ratifier(),
             false,
             0,
             100,
@@ -380,7 +444,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
             address(adapter),
             "",
             address(0),
-            address(0x4444),
+            adapter.ratifier(),
             false,
             0,
             100,
@@ -391,6 +455,10 @@ contract BlueMidnightAdapterAccountingTest is Test {
     }
 
     function _validBuyOffer() internal view returns (Offer memory) {
+        return _validBuyOffer(100);
+    }
+
+    function _validBuyOffer(uint128 maxAssets) internal view returns (Offer memory) {
         return Offer(
             midnightMarket,
             true,
@@ -405,7 +473,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
             adapter.ratifier(),
             false,
             0,
-            100,
+            maxAssets,
             0
         );
     }

@@ -232,6 +232,8 @@ contract BlueMidnightAdapterAccountingTest is Test {
     Market midnightMarket;
     bytes32 midnightId;
 
+    event SellFill(bytes32 indexed marketId, uint256 assets, uint256 units, int256 pnl);
+
     function setUp() public {
         token = new AccountingTokenMock();
         vault = new AccountingVaultMock(address(token));
@@ -314,6 +316,77 @@ contract BlueMidnightAdapterAccountingTest is Test {
         // Morpho's virtual-share conversion rounds the mock's one-decimal gain down by one unit;
         // the assertion still proves proceeds appear once in Blue rather than as duplicated adapter cash.
         assertEq(adapter.realAssets(), initialNav + 9);
+    }
+
+    function testStatefulBuyAccruesClaimFromFillTimeOnlyUntilMaturity() public {
+        uint256 fillTime = midnightMarket.maturity - 31 days;
+        vm.warp(fillTime);
+        uint256 initialNav = adapter.realAssets();
+
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 20);
+        MarketAccounting memory filled = adapter.marketAccounting(midnightId);
+        assertEq(filled.bookValue, 100);
+        assertEq(filled.netMaturityClaim, 120);
+        assertEq(adapter.realAssets(), initialNav);
+
+        vm.warp(fillTime + 10 days);
+        assertEq(adapter.realAssets(), initialNav + 6);
+
+        vm.warp(midnightMarket.maturity);
+        assertEq(adapter.realAssets(), initialNav + 20);
+
+        vm.warp(midnightMarket.maturity + 1 days);
+        assertEq(adapter.realAssets(), initialNav + 20);
+    }
+
+    function testDistinctTimeFillsCheckpointExistingAccrualBeforeAddingNewClaim() public {
+        uint256 fillTime = midnightMarket.maturity - 31 days;
+        vm.warp(fillTime);
+        uint256 initialNav = adapter.realAssets();
+
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 20);
+        vm.warp(fillTime + 10 days);
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 50, 50, 10);
+
+        MarketAccounting memory secondFill = adapter.marketAccounting(midnightId);
+        assertEq(secondFill.bookValue, 156);
+        assertEq(secondFill.netMaturityClaim, 180);
+        assertEq(adapter.realAssets(), initialNav + 6);
+
+        vm.warp(fillTime + 20 days);
+        assertEq(adapter.realAssets(), initialNav + 17);
+
+        vm.warp(midnightMarket.maturity);
+        assertEq(adapter.realAssets(), initialNav + 30);
+
+        vm.warp(midnightMarket.maturity + 1 days);
+        assertEq(adapter.realAssets(), initialNav + 30);
+    }
+
+    function testLossSaleAndNewBuyPreserveLossAndEmitNegativeRealizedPnl() public {
+        uint256 fillTime = midnightMarket.maturity - 31 days;
+        vm.warp(fillTime);
+        uint256 initialNav = adapter.realAssets();
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 101, 100, 23);
+
+        // Midnight's independently synchronized position has lost 34 units of credit and claim before the sale.
+        midnight.setPosition(midnightId, 83, 7);
+        vm.expectEmit(true, false, false, true, address(adapter));
+        emit SellFill(midnightId, 30, 37, -7);
+        midnight.takeMakerSell(adapter, midnightId, midnightMarket, 30, 37, 0);
+
+        MarketAccounting memory afterSale = adapter.marketAccounting(midnightId);
+        assertEq(afterSale.bookValue, 46);
+        assertEq(afterSale.netMaturityClaim, 53);
+        assertEq(afterSale.trackedCredit, 46);
+        assertEq(adapter.realAssets(), initialNav - 25);
+
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 19, 19, 6);
+        MarketAccounting memory afterNewBuy = adapter.marketAccounting(midnightId);
+        assertEq(afterNewBuy.bookValue, 65);
+        assertEq(afterNewBuy.netMaturityClaim, 78);
+        assertEq(afterNewBuy.trackedCredit, 65);
+        assertEq(adapter.realAssets(), initialNav - 25);
     }
 
     function testTwoIndependentlyRatifiedOffersExecuteStatefulBuys() public {

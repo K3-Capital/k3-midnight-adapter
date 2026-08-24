@@ -6,6 +6,7 @@ import {BlueMidnightAdapter} from "../../src/BlueMidnightAdapter.sol";
 import {MarketParams, Id} from "morpho-blue/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "morpho-blue/libraries/MarketParamsLib.sol";
 import {IBuyCallback, ISellCallback} from "midnight/interfaces/ICallbacks.sol";
+import {IdLib} from "midnight/libraries/IdLib.sol";
 import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
 import {Market, CollateralParams, Offer} from "midnight/interfaces/IMidnight.sol";
 import {MarketEconomicPolicy, SafeExit} from "../../src/types/AdapterTypes.sol";
@@ -100,7 +101,6 @@ contract ExitMorpho {
 }
 
 contract ExitMidnight {
-    using HashLib for Market;
     ExitToken immutable token;
     mapping(bytes32 => uint256) public credits;
     mapping(bytes32 => uint256) public available;
@@ -112,7 +112,7 @@ contract ExitMidnight {
     }
 
     function seed(Market calldata market, uint256 credit, uint256 availableAssets, uint256 sellerAssets) external {
-        bytes32 id = market.hashMarket();
+        bytes32 id = IdLib.toId(market);
         credits[id] = credit;
         available[id] = availableAssets;
         saleAssets[id] = sellerAssets;
@@ -125,7 +125,7 @@ contract ExitMidnight {
     function invokeBuyWithFee(address adapter, Market calldata market, uint256 buyerAssets, uint256 units, uint256 fee)
         public
     {
-        bytes32 id = market.hashMarket();
+        bytes32 id = IdLib.toId(market);
         IBuyCallback(adapter).onBuy(id, market, buyerAssets, units, fee, adapter, hex"");
         token.transferFrom(adapter, address(this), buyerAssets);
         credits[id] = units;
@@ -141,12 +141,11 @@ contract ExitMidnight {
         view
         returns (uint128, uint128, uint128)
     {
-        market;
         return (uint128(credits[id]), uint128(pendingFees[id]), 0);
     }
 
     function withdraw(Market calldata market, uint256 units, address, address receiver) external {
-        bytes32 id = market.hashMarket();
+        bytes32 id = IdLib.toId(market);
         available[id] -= units;
         credits[id] -= units;
         token.transfer(receiver, units);
@@ -161,7 +160,7 @@ contract ExitMidnight {
         address takerCallback,
         bytes calldata takerCallbackData
     ) external returns (uint256, uint256) {
-        bytes32 id = offer.market.hashMarket();
+        bytes32 id = IdLib.toId(offer.market);
         uint256 sellerAssets = saleAssets[id];
         credits[id] -= units;
         token.transfer(receiverIfTakerIsSeller, sellerAssets);

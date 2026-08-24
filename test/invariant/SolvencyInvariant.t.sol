@@ -36,7 +36,7 @@ contract SolvencyInvariantTest is Test {
         assertEq(adapter.realAssets(), adapter.expectedSupplyAssets());
     }
 
-    function invariant_realAssetsDoNotExceedHeldAssets() public view {
+    function testRealAssetsDoNotExceedHeldAssets() public view {
         assertLe(adapter.realAssets(), token.balanceOf(address(adapter)) + token.balanceOf(address(morpho)));
     }
 }

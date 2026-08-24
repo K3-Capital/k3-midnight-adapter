@@ -2,7 +2,6 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-svm_dir=${SVM_DIR:-"${HOME}/.svm"}
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/hermes-pinned-core.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
@@ -23,7 +22,7 @@ out = "out"
 libs = []
 EOF
     forge build --root "$tmp/$name" --contracts "src/$name.sol" \
-        --use "$svm_dir/$version/solc-$version" --out "$repo/out-pinned/$name"
+        --use "$version" --out "$repo/out-pinned/$name"
     mkdir -p "$repo/out"
     mkdir -p "$repo/out/$name.sol"
     cp "$repo/out-pinned/$name/$name.sol/$name.json" "$repo/out/$name.sol/$name.json"

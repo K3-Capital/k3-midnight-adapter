@@ -27,6 +27,28 @@ views: `realAssets`, `expectedSupplyAssets`, `blueAvailableLiquidity`,
 `activeMarketIdAt`. The script rebuilds production sources with tests skipped,
 sorts ABI entries and keys, and fails on drift or a missing operator view.
 
+## Clean-checkout validation
+
+The local integration deploys the pinned Vault V2, Morpho Blue, and Midnight
+implementations. Foundry's `--use <version>` resolver downloads the required
+compiler into its own cache; no `${HOME}/.svm` layout or preinstalled compiler
+path is required. Generated core artifacts are disposable and ignored.
+
+```bash
+forge clean
+rm -rf out-pinned
+./script/build-pinned-core-artifacts.sh
+forge fmt --check
+forge build
+forge test --match-path 'test/integration/**' -vvv
+forge test --summary
+```
+
+The script uses temporary source roots and removes them on exit. If compiler
+downloads are unavailable, install the pinned compiler versions through the
+normal Foundry toolchain or provide network access, then rerun the same
+sequence; do not commit `out/`, `out-pinned/`, or compiler caches.
+
 ## Preflight
 
 1. Confirm the approved stack base is `stack/05-exits-liquidity`.

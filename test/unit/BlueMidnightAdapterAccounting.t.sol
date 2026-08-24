@@ -8,6 +8,7 @@ import {IPolicySetterRatifier} from "../../src/interfaces/IPolicySetterRatifier.
 import {MarketParams, Id} from "morpho-blue/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "morpho-blue/libraries/MarketParamsLib.sol";
 import {Market, Offer, CollateralParams} from "midnight/interfaces/IMidnight.sol";
+import {IdLib} from "midnight/libraries/IdLib.sol";
 import {MarketAccounting} from "../../src/types/AdapterTypes.sol";
 import {MarketEconomicPolicy} from "../../src/types/AdapterTypes.sol";
 import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
@@ -154,7 +155,7 @@ contract AccountingMidnightMock {
         address buyer,
         bytes calldata data
     ) external returns (bytes32) {
-        return adapter.onBuy(id, market, assets, units, fee, buyer, data);
+        return adapter.onBuy(IdLib.toId(market), market, assets, units, fee, buyer, data);
     }
 
     function takeMakerBuy(
@@ -168,10 +169,13 @@ contract AccountingMidnightMock {
         ratifier.isRatified(offer, ratifierData, address(0));
         require(assets <= offer.maxAssets, "offer asset limit");
         bytes32 id = HashLib.hashMarket(offer.market);
-        bytes32 result = adapter.onBuy(id, offer.market, assets, units, fee, address(adapter), "");
+        bytes32 protocolId = IdLib.toId(offer.market);
+        bytes32 result = adapter.onBuy(protocolId, offer.market, assets, units, fee, address(adapter), "");
         token.transferFrom(address(adapter), address(this), assets);
         credit[id] += uint128(units);
         pendingFee[id] += uint128(fee);
+        credit[protocolId] += uint128(units);
+        pendingFee[protocolId] += uint128(fee);
         return result;
     }
 
@@ -183,10 +187,13 @@ contract AccountingMidnightMock {
         uint256 units,
         uint256 fee
     ) external returns (bytes32) {
-        bytes32 result = adapter.onBuy(id, market, assets, units, fee, address(adapter), "");
+        bytes32 protocolId = IdLib.toId(market);
+        bytes32 result = adapter.onBuy(protocolId, market, assets, units, fee, address(adapter), "");
         token.transferFrom(address(adapter), address(this), assets);
         credit[id] += uint128(units);
         pendingFee[id] += uint128(fee);
+        credit[protocolId] += uint128(units);
+        pendingFee[protocolId] += uint128(fee);
         return result;
     }
 
@@ -200,10 +207,16 @@ contract AccountingMidnightMock {
     ) external returns (bytes32) {
         credit[id] -= uint128(units);
         pendingFee[id] -= uint128(feeDecrease);
+        bytes32 protocolId = IdLib.toId(market);
+        credit[protocolId] -= uint128(units);
+        pendingFee[protocolId] -= uint128(feeDecrease);
         uint256 balance = token.balanceOf(address(this));
         if (assets > balance) token.mint(address(this), assets - balance);
         token.transfer(address(adapter), assets);
-        return adapter.onSell(id, market, assets, units, feeDecrease, address(adapter), address(adapter), "");
+        return
+            adapter.onSell(
+                IdLib.toId(market), market, assets, units, feeDecrease, address(adapter), address(adapter), ""
+            );
     }
 
     function setPosition(bytes32 id, uint128 credit_, uint128 pendingFee_) external {
@@ -383,7 +396,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
         assertEq(token.balanceOf(address(adapter)), 0);
 
         // Midnight's independently synchronized position has lost 34 units of credit and claim before the sale.
-        midnight.setPosition(midnightId, 83, 7);
+        midnight.setPosition(IdLib.toId(midnightMarket), 83, 7);
         _assertAccounting(midnightId, 101, 124, 100, uint40(fillTime), true);
         _assertBluePosition(999_899, 999_999_999_899);
         assertEq(adapter.realAssets(), initialNav - 11);

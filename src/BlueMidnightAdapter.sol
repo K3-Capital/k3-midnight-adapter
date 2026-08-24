@@ -443,7 +443,6 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             }
             uint256 units = requestedUnits[i];
             uint256 available = IMidnight(midnight).withdrawable(IdLib.toId(markets[i]));
-            if (available == 0) available = IMidnight(midnight).withdrawable(id);
             if (units == 0 || units > available) units = available;
             if (units == 0) continue;
             _checkpoint(id, markets[i], 0, 0);
@@ -583,7 +582,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (msg.sender != midnight || buyer != address(this)) revert Unauthorized();
         bytes32 marketId = HashLib.hashMarket(market);
         if (
-            (id != marketId && id != IdLib.toId(market)) || !marketEnabled[marketId] || market.midnight != midnight
+            id != IdLib.toId(market) || !marketEnabled[marketId] || market.midnight != midnight
                 || market.loanToken != asset
         ) revert InvalidOffer();
         _checkpoint(marketId, market, 0, 0);
@@ -628,10 +627,8 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             revert InvalidReceiver();
         }
         bytes32 marketId = HashLib.hashMarket(market);
-        if (
-            (id != marketId && id != IdLib.toId(market)) || (!marketEnabled[marketId] && !safeExitInProgress)
-                || market.loanToken != asset
-        ) {
+        if (id != IdLib.toId(market) || (!marketEnabled[marketId] && !safeExitInProgress) || market.loanToken != asset)
+        {
             revert InvalidOffer();
         }
         if (data.length != 0 || units == 0) revert InvalidCallback();
@@ -719,9 +716,6 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (a.active && a.trackedCredit != 0) {
             (uint128 credit, uint128 pendingFee,) =
                 IMidnight(midnight).updatePositionView(market, IdLib.toId(market), address(this));
-            if (credit == 0) {
-                (credit, pendingFee,) = IMidnight(midnight).updatePositionView(market, id, address(this));
-            }
             uint256 preSaleCredit = uint256(credit) + soldUnits;
             if (preSaleCredit < a.trackedCredit) {
                 uint256 oldCredit = a.trackedCredit;
@@ -751,9 +745,6 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         MidnightMarket memory market = abi.decode(encodedMidnightMarket[id], (MidnightMarket));
         (uint128 credit, uint128 pendingFee,) =
             IMidnight(midnight).updatePositionView(market, IdLib.toId(market), address(this));
-        if (credit == 0) {
-            (credit, pendingFee,) = IMidnight(midnight).updatePositionView(market, id, address(this));
-        }
         uint256 claim = uint256(credit) + uint256(pendingFee);
         uint256 synchronizedClaim = claim < a.netMaturityClaim ? claim : a.netMaturityClaim;
         uint256 accrued = a.bookValue;

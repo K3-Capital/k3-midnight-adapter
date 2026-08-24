@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Keep the repository free of generated Foundry artifacts and local secrets.
 out/
+out-pinned/
 cache/
 broadcast/
 .env

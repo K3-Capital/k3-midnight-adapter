@@ -7,7 +7,13 @@ import {SafeERC20Lib} from "vault-v2/libraries/SafeERC20Lib.sol";
 import {IMorpho, Market, MarketParams, Position, Id} from "morpho-blue/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "morpho-blue/libraries/MarketParamsLib.sol";
 import {SharesMathLib} from "morpho-blue/libraries/SharesMathLib.sol";
-import {BlueMarketConfig, MarketAccounting, MarketEconomicPolicy} from "./types/AdapterTypes.sol";
+import {
+    BlueMarketConfig,
+    MarketAccounting,
+    MarketEconomicPolicy,
+    SafeExit,
+    SafeExitPayload
+} from "./types/AdapterTypes.sol";
 import {IBlueMidnightAdapter} from "./interfaces/IBlueMidnightAdapter.sol";
 import {IMidnight, Market as MidnightMarket, Offer} from "midnight/interfaces/IMidnight.sol";
 import {CALLBACK_SUCCESS, MAX_CONTINUOUS_FEE, MAX_SETTLEMENT_FEE_360_DAYS} from "midnight/libraries/ConstantsLib.sol";
@@ -43,6 +49,12 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     error InsufficientCredit();
     error InvalidReceiver();
     error AccountingOverflow();
+    error InvalidExitPayload();
+    error ExitPriceTooLow();
+    error ExitLossExceeded();
+    error ExitMarketMismatch();
+    error ExitOfferInvalid();
+    error RepaymentUnavailable();
 
     event Submit(bytes4 indexed selector, bytes data, uint256 executableAt);
     event Accept(bytes4 indexed selector, bytes data);
@@ -57,6 +69,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     event SellFill(bytes32 indexed marketId, uint256 assets, uint256 units, int256 pnl);
     event MarketPolicySet(bytes32 indexed marketId, uint256 maxExposure, uint256 maxAssets, bool enabled);
     event MarketEconomicPolicySet(bytes32 indexed marketId, MarketEconomicPolicy policy, bool immediate);
+    event RepaymentCollected(bytes32 indexed marketId, uint256 units, uint256 assets);
+    event SafeExitExecuted(bytes32 indexed marketId, uint256 units, uint256 assets, uint256 loss);
+    event MarketDisabledEvent(bytes32 indexed marketId);
 
     address public immutable factory;
     address public immutable parentVault;
@@ -87,6 +102,8 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     mapping(bytes32 marketId => uint256) public marketAssetCap;
     mapping(bytes32 marketId => MarketEconomicPolicy) public marketEconomicPolicy;
     mapping(bytes32 marketId => bytes) internal encodedMidnightMarket;
+    uint256 public maxExitLossAssets;
+    uint24 public minExitBuyTick;
 
     constructor(address _parentVault, address _midnight, address _morphoBlue, address _ratifier) {
         if (_parentVault == address(0) || _midnight == address(0) || _morphoBlue == address(0)) revert InvalidValue();
@@ -304,6 +321,40 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         emit PolicyEpochIncremented(policyEpoch, reason);
     }
 
+    /// @notice Disable one market immediately while retaining recovery paths.
+    function disableMarket(bytes32 marketId) external onlySentinel {
+        marketEnabled[marketId] = false;
+        if (accounting[marketId].trackedCredit == 0) _removeActiveMarket(marketId);
+        _bumpEpoch("market-risk-off");
+        emit MarketDisabledEvent(marketId);
+    }
+
+    function setExitLossLimit(uint256 newLimit) external onlyCurator {
+        _timelocked();
+        if (newLimit < maxExitLossAssets) revert ExposureLimit();
+        maxExitLossAssets = newLimit;
+        _bumpEpoch("exit-loss-limit");
+    }
+
+    function lowerExitLossLimit(uint256 newLimit) external onlySentinel {
+        if (newLimit > maxExitLossAssets) revert ExposureLimit();
+        maxExitLossAssets = newLimit;
+        _bumpEpoch("exit-loss-limit-lower");
+    }
+
+    function setMinExitBuyTick(uint24 newTick) external onlyCurator {
+        _timelocked();
+        if (newTick < minExitBuyTick || newTick > MAX_TICK) revert InvalidValue();
+        minExitBuyTick = newTick;
+        _bumpEpoch("exit-price-limit");
+    }
+
+    function tightenMinExitBuyTick(uint24 newTick) external onlyCuratorOrSentinel {
+        if (newTick < minExitBuyTick || newTick > MAX_TICK) revert InvalidValue();
+        minExitBuyTick = newTick;
+        _bumpEpoch("exit-price-limit-tighten");
+    }
+
     function allocate(bytes memory data, uint256 assets, bytes4, address)
         external
         onlyParentVault
@@ -330,19 +381,75 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         returns (bytes32[] memory ids, int256 change)
     {
         if (!blueMarketConfigured || data.length == 0) revert InvalidMarket();
-        MarketParams memory market = abi.decode(data, (MarketParams));
+        MarketParams memory market;
+        SafeExitPayload memory payload;
+        bool hasExitPayload;
+        // A version byte is encoded as the first ABI word. Legacy market-only
+        // data remains accepted for callers from the preceding stack layer.
+        uint256 firstWord;
+        assembly {
+            firstWord := mload(add(data, 32))
+        }
+        if (data.length >= 32 && firstWord <= type(uint8).max) {
+            if (firstWord != 1) revert InvalidExitPayload();
+            payload = abi.decode(data, (SafeExitPayload));
+            if (payload.version != 1) revert InvalidExitPayload();
+            market = blue.market;
+            hasExitPayload = true;
+        } else {
+            market = abi.decode(data, (MarketParams));
+        }
         if (Id.unwrap(market.id()) != blue.marketId) revert InvalidMarket();
         uint256 oldAssets = expectedSupplyAssets();
         uint256 withdrawn;
         uint256 burnedShares;
         if (assets != 0) {
-            (withdrawn, burnedShares) = IMorpho(morphoBlue).withdraw(market, assets, 0, address(this), address(this));
+            try IMorpho(morphoBlue).withdraw(market, assets, 0, address(this), address(this)) returns (
+                uint256 blueWithdrawn, uint256 blueBurnedShares
+            ) {
+                withdrawn = blueWithdrawn;
+                burnedShares = blueBurnedShares;
+            } catch {
+                if (!hasExitPayload) revert InsufficientLiquidity();
+                _executeSafeExits(payload, assets);
+                (withdrawn, burnedShares) =
+                    IMorpho(morphoBlue).withdraw(market, assets, 0, address(this), address(this));
+            }
             if (withdrawn != assets) revert InsufficientLiquidity();
         }
         uint256 newAssets = expectedSupplyAssets();
         ids = _ids();
         change = int256(newAssets) - int256(oldAssets);
         emit Deallocate(blue.marketId, withdrawn, burnedShares);
+    }
+
+    /// @notice Permissionless collection of available Midnight repayments.
+    /// @dev This path is intentionally available while risk-off is active.
+    function collectRepayments(MidnightMarket[] calldata markets, uint256[] calldata requestedUnits)
+        external
+        returns (uint256 totalAssets)
+    {
+        if (markets.length != requestedUnits.length) revert InvalidValue();
+        for (uint256 i; i < markets.length; ++i) {
+            bytes32 id = HashLib.hashMarket(markets[i]);
+            if (markets[i].midnight != midnight || markets[i].loanToken != asset || !marketKnown(id)) {
+                revert InvalidMarket();
+            }
+            uint256 units = requestedUnits[i];
+            uint256 available = IMidnight(midnight).withdrawable(id);
+            if (units == 0 || units > available) units = available;
+            if (units == 0) continue;
+            _checkpoint(id, markets[i], 0, 0);
+            uint256 beforeBalance = IERC20(asset).balanceOf(address(this));
+            IMidnight(midnight).withdraw(markets[i], units, address(this), address(this));
+            uint256 received = IERC20(asset).balanceOf(address(this)) - beforeBalance;
+            if (received == 0) revert RepaymentUnavailable();
+            _reduceCreditAfterRecovery(id, units);
+            (uint256 supplied,) = IMorpho(morphoBlue).supply(blue.market, received, 0, address(this), hex"");
+            if (supplied != received) revert InvalidCallback();
+            totalAssets += received;
+            emit RepaymentCollected(id, units, received);
+        }
     }
 
     function realAssets() external view returns (uint256) {
@@ -536,6 +643,54 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         }
         emit SellFill(id, sellerAssets, units, pnl);
         return CALLBACK_SUCCESS;
+    }
+
+    function _executeSafeExits(SafeExitPayload memory payload, uint256 requiredAssets) internal {
+        if (payload.version != 1 || payload.exits.length == 0 || payload.maxLossAssets > maxExitLossAssets) {
+            revert InvalidExitPayload();
+        }
+        uint256 proceeds;
+        for (uint256 i; i < payload.exits.length; ++i) {
+            SafeExit memory exit = payload.exits[i];
+            Offer memory offer = exit.offer;
+            bytes32 id = HashLib.hashMarket(offer.market);
+            if (
+                !offer.buy || offer.maker == address(this) || offer.callback != address(0)
+                    || offer.receiverIfMakerIsSeller != address(0) || offer.callbackData.length != 0
+                    || offer.ratifier == address(0) || offer.maxAssets == 0 || offer.maxUnits != 0
+                    || offer.tick < minExitBuyTick || offer.market.midnight != midnight
+                    || offer.market.loanToken != asset || offer.market.chainId != block.chainid
+                    || offer.start > block.timestamp || offer.expiry < block.timestamp || !marketKnown(id)
+                    || exit.units == 0 || exit.units > accounting[id].trackedCredit
+            ) revert ExitOfferInvalid();
+
+            // For a maker-buy offer the taker is the seller. The only receiver
+            // accepted by this adapter is itself; the callback is also fixed
+            // so a quoter cannot inject a payer or receiver through calldata.
+            (, uint256 sellerAssets) = IMidnight(midnight)
+                .take(offer, exit.ratifierData, exit.units, address(this), address(this), address(this), hex"");
+            proceeds += sellerAssets;
+            emit SafeExitExecuted(id, exit.units, sellerAssets, 0);
+        }
+        uint256 loss = requiredAssets > proceeds ? requiredAssets - proceeds : 0;
+        if (loss > payload.maxLossAssets || loss > maxExitLossAssets) revert ExitLossExceeded();
+    }
+
+    function marketKnown(bytes32 marketId) public view returns (bool) {
+        return marketEnabled[marketId] || accounting[marketId].trackedCredit != 0;
+    }
+
+    function _reduceCreditAfterRecovery(bytes32 id, uint256 units) internal {
+        MarketAccounting storage a = accounting[id];
+        if (units > a.trackedCredit || a.trackedCredit == 0) revert InsufficientCredit();
+        uint256 oldCredit = a.trackedCredit;
+        a.bookValue = _toUint128(uint256(a.bookValue) * (oldCredit - units) / oldCredit);
+        a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) * (oldCredit - units) / oldCredit);
+        a.trackedCredit = _toUint128(oldCredit - units);
+        if (a.trackedCredit == 0) {
+            a.active = false;
+            if (!marketEnabled[id]) _removeActiveMarket(id);
+        }
     }
 
     function _checkpoint(bytes32 id, MidnightMarket memory market, uint256 feeDecrease, uint256 soldUnits)

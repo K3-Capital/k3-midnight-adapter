@@ -2,6 +2,7 @@
 pragma solidity 0.8.34;
 
 import {MarketParams} from "morpho-blue/interfaces/IMorpho.sol";
+import {Offer} from "midnight/interfaces/IMidnight.sol";
 
 /// @dev Shared data shapes only; behavior is intentionally deferred to later stack layers.
 struct BlueMarketConfig {
@@ -25,4 +26,16 @@ struct MarketEconomicPolicy {
     uint32 maxContinuousFeePerSecondWad;
     uint64 maxSettlementFeeWad;
     bool configured;
+}
+
+struct SafeExit {
+    Offer offer;
+    bytes ratifierData;
+    uint256 units;
+}
+
+struct SafeExitPayload {
+    uint8 version;
+    SafeExit[] exits;
+    uint256 maxLossAssets;
 }

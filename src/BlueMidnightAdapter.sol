@@ -18,6 +18,7 @@ import {IBlueMidnightAdapter} from "./interfaces/IBlueMidnightAdapter.sol";
 import {IMidnight, Market as MidnightMarket, Offer} from "midnight/interfaces/IMidnight.sol";
 import {CALLBACK_SUCCESS, MAX_CONTINUOUS_FEE, MAX_SETTLEMENT_FEE_360_DAYS} from "midnight/libraries/ConstantsLib.sol";
 import {MAX_TICK} from "midnight/libraries/TickLib.sol";
+import {IdLib} from "midnight/libraries/IdLib.sol";
 import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
 
 /// @title Blue Midnight adapter core
@@ -441,7 +442,8 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
                 revert InvalidMarket();
             }
             uint256 units = requestedUnits[i];
-            uint256 available = IMidnight(midnight).withdrawable(id);
+            uint256 available = IMidnight(midnight).withdrawable(IdLib.toId(markets[i]));
+            if (available == 0) available = IMidnight(midnight).withdrawable(id);
             if (units == 0 || units > available) units = available;
             if (units == 0) continue;
             _checkpoint(id, markets[i], 0, 0);
@@ -527,6 +529,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
                 || offer.market.loanToken != asset
         ) return false;
         bytes32 marketId = HashLib.hashMarket(offer.market);
+        bytes32 protocolMarketId = IdLib.toId(offer.market);
         MarketEconomicPolicy memory policy = marketEconomicPolicy[marketId];
         if (!marketEnabled[marketId] || !policy.configured || offer.start > block.timestamp) return false;
         if (
@@ -542,9 +545,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (offer.tick > MAX_TICK || offer.continuousFeeCap > MAX_CONTINUOUS_FEE) return false;
         if (offer.group != keccak256(abi.encode(address(this), policyEpoch))) return false;
         if (offer.continuousFeeCap > policy.maxContinuousFeePerSecondWad) return false;
-        if (IMidnight(midnight).continuousFee(marketId) > offer.continuousFeeCap) return false;
+        if (IMidnight(midnight).continuousFee(protocolMarketId) > offer.continuousFeeCap) return false;
         if (
-            IMidnight(midnight).settlementFee(marketId, offer.market.maturity - block.timestamp)
+            IMidnight(midnight).settlementFee(protocolMarketId, offer.market.maturity - block.timestamp)
                 > policy.maxSettlementFeeWad
         ) {
             return false;
@@ -578,15 +581,16 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         bytes memory data
     ) external returns (bytes32) {
         if (msg.sender != midnight || buyer != address(this)) revert Unauthorized();
+        bytes32 marketId = HashLib.hashMarket(market);
         if (
-            id != HashLib.hashMarket(market) || !marketEnabled[id] || market.midnight != midnight
+            (id != marketId && id != IdLib.toId(market)) || !marketEnabled[marketId] || market.midnight != midnight
                 || market.loanToken != asset
         ) revert InvalidOffer();
-        _checkpoint(id, market, 0, 0);
-        if (riskOffActive || buyerAssets > buyerAssetsBound(id)) revert ExposureExceeded();
+        _checkpoint(marketId, market, 0, 0);
+        if (riskOffActive || buyerAssets > buyerAssetsBound(marketId)) revert ExposureExceeded();
         if (
-            accounting[id].trackedCredit > marketExposureCap[id]
-                || units > marketExposureCap[id] - accounting[id].trackedCredit
+            accounting[marketId].trackedCredit > marketExposureCap[marketId]
+                || units > marketExposureCap[marketId] - accounting[marketId].trackedCredit
         ) revert ExposureExceeded();
         // The adapter has exactly one configured Blue route. Empty data is pinned so the offer cannot carry an
         // alternate routing payload that might diverge from the policy predicate.
@@ -599,14 +603,14 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             SafeERC20Lib.safeApprove(asset, midnight, 0);
             SafeERC20Lib.safeApprove(asset, midnight, buyerAssets);
         }
-        MarketAccounting storage a = accounting[id];
+        MarketAccounting storage a = accounting[marketId];
         a.bookValue = _toUint128(uint256(a.bookValue) + buyerAssets);
         a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) + buyerAssets + pendingFeeIncrease);
         a.trackedCredit = _toUint128(uint256(a.trackedCredit) + units);
         a.active = true;
-        encodedMidnightMarket[id] = abi.encode(market);
-        _addActiveMarket(id);
-        emit BuyFill(id, buyerAssets, units, a.bookValue);
+        encodedMidnightMarket[marketId] = abi.encode(market);
+        _addActiveMarket(marketId);
+        emit BuyFill(marketId, buyerAssets, units, a.bookValue);
         return CALLBACK_SUCCESS;
     }
 
@@ -623,14 +627,16 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (msg.sender != midnight || seller != address(this) || receiver != address(this)) {
             revert InvalidReceiver();
         }
+        bytes32 marketId = HashLib.hashMarket(market);
         if (
-            id != HashLib.hashMarket(market) || (!marketEnabled[id] && !safeExitInProgress) || market.loanToken != asset
+            (id != marketId && id != IdLib.toId(market)) || (!marketEnabled[marketId] && !safeExitInProgress)
+                || market.loanToken != asset
         ) {
             revert InvalidOffer();
         }
         if (data.length != 0 || units == 0) revert InvalidCallback();
-        uint256 postSaleClaim = _checkpoint(id, market, pendingFeeDecrease, units);
-        MarketAccounting storage a = accounting[id];
+        uint256 postSaleClaim = _checkpoint(marketId, market, pendingFeeDecrease, units);
+        MarketAccounting storage a = accounting[marketId];
         if (units > a.trackedCredit || a.trackedCredit == 0) revert InsufficientCredit();
         uint256 oldBook = a.bookValue;
         uint256 reduction = oldBook * units / a.trackedCredit;
@@ -649,9 +655,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         }
         if (a.trackedCredit == 0) {
             a.active = false;
-            if (!marketEnabled[id]) _removeActiveMarket(id);
+            if (!marketEnabled[marketId]) _removeActiveMarket(marketId);
         }
-        emit SellFill(id, sellerAssets, units, pnl);
+        emit SellFill(marketId, sellerAssets, units, pnl);
         return CALLBACK_SUCCESS;
     }
 
@@ -711,7 +717,11 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     {
         MarketAccounting storage a = accounting[id];
         if (a.active && a.trackedCredit != 0) {
-            (uint128 credit, uint128 pendingFee,) = IMidnight(midnight).updatePositionView(market, id, address(this));
+            (uint128 credit, uint128 pendingFee,) =
+                IMidnight(midnight).updatePositionView(market, IdLib.toId(market), address(this));
+            if (credit == 0) {
+                (credit, pendingFee,) = IMidnight(midnight).updatePositionView(market, id, address(this));
+            }
             uint256 preSaleCredit = uint256(credit) + soldUnits;
             if (preSaleCredit < a.trackedCredit) {
                 uint256 oldCredit = a.trackedCredit;
@@ -739,7 +749,11 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         MarketAccounting memory a = accounting[id];
         if (!a.active || a.trackedCredit == 0 || encodedMidnightMarket[id].length == 0) return a.bookValue;
         MidnightMarket memory market = abi.decode(encodedMidnightMarket[id], (MidnightMarket));
-        (uint128 credit, uint128 pendingFee,) = IMidnight(midnight).updatePositionView(market, id, address(this));
+        (uint128 credit, uint128 pendingFee,) =
+            IMidnight(midnight).updatePositionView(market, IdLib.toId(market), address(this));
+        if (credit == 0) {
+            (credit, pendingFee,) = IMidnight(midnight).updatePositionView(market, id, address(this));
+        }
         uint256 claim = uint256(credit) + uint256(pendingFee);
         uint256 synchronizedClaim = claim < a.netMaturityClaim ? claim : a.netMaturityClaim;
         uint256 accrued = a.bookValue;

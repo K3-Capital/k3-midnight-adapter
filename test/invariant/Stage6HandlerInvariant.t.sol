@@ -173,7 +173,10 @@ contract Stage6HandlerInvariantTest is Test {
 
     function invariant_supplyAndBookValueHaveTokenBacking() public view {
         assertLe(adapter.expectedSupplyAssets(), token.balanceOf(address(morpho)));
-        assertLe(adapter.realAssets(), token.balanceOf(address(adapter)) + token.balanceOf(address(morpho)) + token.balanceOf(address(midnight)));
+        assertLe(
+            adapter.realAssets(),
+            token.balanceOf(address(adapter)) + token.balanceOf(address(morpho)) + token.balanceOf(address(midnight))
+        );
     }
 
     function invariant_riskOffCannotBeBypassed() public view {

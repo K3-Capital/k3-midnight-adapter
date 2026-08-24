@@ -104,6 +104,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     mapping(bytes32 marketId => bytes) internal encodedMidnightMarket;
     uint256 public maxExitLossAssets;
     uint24 public minExitBuyTick;
+    bool internal safeExitInProgress;
 
     constructor(address _parentVault, address _midnight, address _morphoBlue, address _ratifier) {
         if (_parentVault == address(0) || _midnight == address(0) || _morphoBlue == address(0)) revert InvalidValue();
@@ -124,6 +125,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         timelock[
             bytes4(keccak256("setMarketEconomicPolicy(bytes32,(uint24,uint24,uint40,uint40,uint32,uint64,bool))"))
         ] = 2 days;
+        timelock[bytes4(keccak256("setExitLossLimit(uint256)"))] = 2 days;
         SafeERC20Lib.safeApprove(asset, _morphoBlue, type(uint256).max);
         SafeERC20Lib.safeApprove(asset, _parentVault, type(uint256).max);
     }
@@ -392,7 +394,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         }
         if (data.length >= 32 && firstWord <= type(uint8).max) {
             if (firstWord != 1) revert InvalidExitPayload();
-            payload = abi.decode(data, (SafeExitPayload));
+            (uint8 version, SafeExit[] memory exits, uint256 maxLossAssets) =
+                abi.decode(data, (uint8, SafeExit[], uint256));
+            payload = SafeExitPayload(version, exits, maxLossAssets);
             if (payload.version != 1) revert InvalidExitPayload();
             market = blue.market;
             hasExitPayload = true;
@@ -618,7 +622,11 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (msg.sender != midnight || seller != address(this) || receiver != address(this)) {
             revert InvalidReceiver();
         }
-        if (id != HashLib.hashMarket(market) || !marketEnabled[id] || market.loanToken != asset) revert InvalidOffer();
+        if (
+            id != HashLib.hashMarket(market) || (!marketEnabled[id] && !safeExitInProgress) || market.loanToken != asset
+        ) {
+            revert InvalidOffer();
+        }
         if (data.length != 0 || units == 0) revert InvalidCallback();
         uint256 postSaleClaim = _checkpoint(id, market, pendingFeeDecrease, units);
         MarketAccounting storage a = accounting[id];
@@ -650,6 +658,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             revert InvalidExitPayload();
         }
         uint256 proceeds;
+        uint256 realizedLoss;
         for (uint256 i; i < payload.exits.length; ++i) {
             SafeExit memory exit = payload.exits[i];
             Offer memory offer = exit.offer;
@@ -663,17 +672,27 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
                     || offer.start > block.timestamp || offer.expiry < block.timestamp || !marketKnown(id)
                     || exit.units == 0 || exit.units > accounting[id].trackedCredit
             ) revert ExitOfferInvalid();
+            uint256 oldCredit = accounting[id].trackedCredit;
+            uint256 oldBook = accounting[id].bookValue;
+            uint256 removedBook = oldBook * exit.units / oldCredit;
 
             // For a maker-buy offer the taker is the seller. The only receiver
             // accepted by this adapter is itself; the callback is also fixed
             // so a quoter cannot inject a payer or receiver through calldata.
+            safeExitInProgress = true;
             (, uint256 sellerAssets) = IMidnight(midnight)
                 .take(offer, exit.ratifierData, exit.units, address(this), address(this), address(this), hex"");
+            safeExitInProgress = false;
             proceeds += sellerAssets;
-            emit SafeExitExecuted(id, exit.units, sellerAssets, 0);
+            uint256 saleLoss = removedBook > sellerAssets ? removedBook - sellerAssets : 0;
+            realizedLoss += saleLoss;
+            emit SafeExitExecuted(id, exit.units, sellerAssets, saleLoss);
         }
         uint256 loss = requiredAssets > proceeds ? requiredAssets - proceeds : 0;
-        if (loss > payload.maxLossAssets || loss > maxExitLossAssets) revert ExitLossExceeded();
+        if (
+            loss > payload.maxLossAssets || loss > maxExitLossAssets || realizedLoss > payload.maxLossAssets
+                || realizedLoss > maxExitLossAssets
+        ) revert ExitLossExceeded();
     }
 
     function marketKnown(bytes32 marketId) public view returns (bool) {

@@ -22,3 +22,7 @@ wrap_comments = true
 
 [fuzz]
 runs = 256
+
+[invariant]
+runs = 1
+depth = 1

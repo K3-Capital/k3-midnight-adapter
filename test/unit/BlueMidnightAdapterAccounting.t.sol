@@ -327,16 +327,20 @@ contract BlueMidnightAdapterAccountingTest is Test {
         MarketAccounting memory filled = adapter.marketAccounting(midnightId);
         assertEq(filled.bookValue, 100);
         assertEq(filled.netMaturityClaim, 120);
+        _assertAccounting(midnightId, 100, 120, 100, uint40(fillTime), true);
         assertEq(adapter.realAssets(), initialNav);
 
         vm.warp(fillTime + 10 days);
         assertEq(adapter.realAssets(), initialNav + 6);
+        _assertAccounting(midnightId, 100, 120, 100, uint40(fillTime), true);
 
         vm.warp(midnightMarket.maturity);
         assertEq(adapter.realAssets(), initialNav + 20);
+        _assertAccounting(midnightId, 100, 120, 100, uint40(fillTime), true);
 
         vm.warp(midnightMarket.maturity + 1 days);
         assertEq(adapter.realAssets(), initialNav + 20);
+        _assertAccounting(midnightId, 100, 120, 100, uint40(fillTime), true);
     }
 
     function testDistinctTimeFillsCheckpointExistingAccrualBeforeAddingNewClaim() public {
@@ -351,16 +355,21 @@ contract BlueMidnightAdapterAccountingTest is Test {
         MarketAccounting memory secondFill = adapter.marketAccounting(midnightId);
         assertEq(secondFill.bookValue, 156);
         assertEq(secondFill.netMaturityClaim, 180);
+        _assertAccounting(midnightId, 156, 180, 150, uint40(fillTime + 10 days), true);
         assertEq(adapter.realAssets(), initialNav + 6);
+        _assertAccounting(midnightId, 156, 180, 150, uint40(fillTime + 10 days), true);
 
         vm.warp(fillTime + 20 days);
         assertEq(adapter.realAssets(), initialNav + 17);
+        _assertAccounting(midnightId, 156, 180, 150, uint40(fillTime + 10 days), true);
 
         vm.warp(midnightMarket.maturity);
         assertEq(adapter.realAssets(), initialNav + 30);
+        _assertAccounting(midnightId, 156, 180, 150, uint40(fillTime + 10 days), true);
 
         vm.warp(midnightMarket.maturity + 1 days);
         assertEq(adapter.realAssets(), initialNav + 30);
+        _assertAccounting(midnightId, 156, 180, 150, uint40(fillTime + 10 days), true);
     }
 
     function testLossSaleAndNewBuyPreserveLossAndEmitNegativeRealizedPnl() public {
@@ -368,9 +377,17 @@ contract BlueMidnightAdapterAccountingTest is Test {
         vm.warp(fillTime);
         uint256 initialNav = adapter.realAssets();
         midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 101, 100, 23);
+        _assertAccounting(midnightId, 101, 124, 100, uint40(fillTime), true);
+        _assertBluePosition(999_899, 999_999_999_899);
+        assertEq(adapter.realAssets(), initialNav);
+        assertEq(token.balanceOf(address(adapter)), 0);
 
         // Midnight's independently synchronized position has lost 34 units of credit and claim before the sale.
         midnight.setPosition(midnightId, 83, 7);
+        _assertAccounting(midnightId, 101, 124, 100, uint40(fillTime), true);
+        _assertBluePosition(999_899, 999_999_999_899);
+        assertEq(adapter.realAssets(), initialNav - 11);
+        assertEq(token.balanceOf(address(adapter)), 0);
         vm.expectEmit(true, false, false, true, address(adapter));
         emit SellFill(midnightId, 30, 37, -7);
         midnight.takeMakerSell(adapter, midnightId, midnightMarket, 30, 37, 0);
@@ -379,14 +396,20 @@ contract BlueMidnightAdapterAccountingTest is Test {
         assertEq(afterSale.bookValue, 46);
         assertEq(afterSale.netMaturityClaim, 53);
         assertEq(afterSale.trackedCredit, 46);
+        _assertAccounting(midnightId, 46, 53, 46, uint40(fillTime), true);
+        _assertBluePosition(999_929, 999_999_999_929);
         assertEq(adapter.realAssets(), initialNav - 25);
+        assertEq(token.balanceOf(address(adapter)), 0);
 
         midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 19, 19, 6);
         MarketAccounting memory afterNewBuy = adapter.marketAccounting(midnightId);
         assertEq(afterNewBuy.bookValue, 65);
         assertEq(afterNewBuy.netMaturityClaim, 78);
         assertEq(afterNewBuy.trackedCredit, 65);
+        _assertAccounting(midnightId, 65, 78, 65, uint40(fillTime), true);
+        _assertBluePosition(999_910, 999_999_999_910);
         assertEq(adapter.realAssets(), initialNav - 25);
+        assertEq(token.balanceOf(address(adapter)), 0);
     }
 
     function testTwoIndependentlyRatifiedOffersExecuteStatefulBuys() public {
@@ -525,6 +548,28 @@ contract BlueMidnightAdapterAccountingTest is Test {
         );
 
         assertTrue(adapter.acceptsOffer(offer));
+    }
+
+    function _assertAccounting(
+        bytes32 marketId,
+        uint128 expectedBookValue,
+        uint128 expectedClaim,
+        uint128 expectedCredit,
+        uint40 expectedCheckpoint,
+        bool expectedActive
+    ) internal view {
+        MarketAccounting memory a = adapter.marketAccounting(marketId);
+        assertEq(a.bookValue, expectedBookValue);
+        assertEq(a.netMaturityClaim, expectedClaim);
+        assertEq(a.trackedCredit, expectedCredit);
+        assertEq(a.lastCheckpoint, expectedCheckpoint);
+        assertEq(a.active, expectedActive);
+    }
+
+    function _assertBluePosition(uint128 expectedSupplyAssets, uint256 expectedSupplyShares) internal view {
+        assertEq(morpho.balances(Id.unwrap(blueMarket.id()), 0), expectedSupplyAssets);
+        assertEq(morpho.balances(Id.unwrap(blueMarket.id()), 1), expectedSupplyShares);
+        assertEq(morpho.shares(Id.unwrap(blueMarket.id())), expectedSupplyShares);
     }
 
     function _validBuyOffer() internal view returns (Offer memory) {

@@ -105,6 +105,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     uint256 public maxExitLossAssets;
     uint24 public minExitBuyTick;
     bool internal safeExitInProgress;
+    uint256 internal safeExitLastRemovedBook;
 
     constructor(address _parentVault, address _midnight, address _morphoBlue, address _ratifier) {
         if (_parentVault == address(0) || _midnight == address(0) || _morphoBlue == address(0)) revert InvalidValue();
@@ -634,6 +635,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         uint256 oldBook = a.bookValue;
         uint256 reduction = oldBook * units / a.trackedCredit;
         a.bookValue = _toUint128(uint256(a.bookValue) - reduction);
+        if (safeExitInProgress) safeExitLastRemovedBook = reduction;
         a.netMaturityClaim =
             _toUint128(uint256(a.netMaturityClaim) - uint256(a.netMaturityClaim) * units / a.trackedCredit);
         a.trackedCredit = _toUint128(uint256(a.trackedCredit) - units);
@@ -653,11 +655,10 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         return CALLBACK_SUCCESS;
     }
 
-    function _executeSafeExits(SafeExitPayload memory payload, uint256 requiredAssets) internal {
+    function _executeSafeExits(SafeExitPayload memory payload, uint256) internal {
         if (payload.version != 1 || payload.exits.length == 0 || payload.maxLossAssets > maxExitLossAssets) {
             revert InvalidExitPayload();
         }
-        uint256 proceeds;
         uint256 realizedLoss;
         for (uint256 i; i < payload.exits.length; ++i) {
             SafeExit memory exit = payload.exits[i];
@@ -672,27 +673,19 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
                     || offer.start > block.timestamp || offer.expiry < block.timestamp || !marketKnown(id)
                     || exit.units == 0 || exit.units > accounting[id].trackedCredit
             ) revert ExitOfferInvalid();
-            uint256 oldCredit = accounting[id].trackedCredit;
-            uint256 oldBook = accounting[id].bookValue;
-            uint256 removedBook = oldBook * exit.units / oldCredit;
-
             // For a maker-buy offer the taker is the seller. The only receiver
             // accepted by this adapter is itself; the callback is also fixed
             // so a quoter cannot inject a payer or receiver through calldata.
+            safeExitLastRemovedBook = 0;
             safeExitInProgress = true;
             (, uint256 sellerAssets) = IMidnight(midnight)
                 .take(offer, exit.ratifierData, exit.units, address(this), address(this), address(this), hex"");
             safeExitInProgress = false;
-            proceeds += sellerAssets;
-            uint256 saleLoss = removedBook > sellerAssets ? removedBook - sellerAssets : 0;
+            uint256 saleLoss = safeExitLastRemovedBook > sellerAssets ? safeExitLastRemovedBook - sellerAssets : 0;
             realizedLoss += saleLoss;
             emit SafeExitExecuted(id, exit.units, sellerAssets, saleLoss);
         }
-        uint256 loss = requiredAssets > proceeds ? requiredAssets - proceeds : 0;
-        if (
-            loss > payload.maxLossAssets || loss > maxExitLossAssets || realizedLoss > payload.maxLossAssets
-                || realizedLoss > maxExitLossAssets
-        ) revert ExitLossExceeded();
+        if (realizedLoss > payload.maxLossAssets || realizedLoss > maxExitLossAssets) revert ExitLossExceeded();
     }
 
     function marketKnown(bytes32 marketId) public view returns (bool) {

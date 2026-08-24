@@ -105,6 +105,7 @@ contract ExitMidnight {
     mapping(bytes32 => uint256) public credits;
     mapping(bytes32 => uint256) public available;
     mapping(bytes32 => uint256) public saleAssets;
+    mapping(bytes32 => uint256) public pendingFees;
 
     constructor(address token_) {
         token = ExitToken(token_);
@@ -118,10 +119,17 @@ contract ExitMidnight {
     }
 
     function invokeBuy(address adapter, Market calldata market, uint256 buyerAssets, uint256 units) external {
+        invokeBuyWithFee(adapter, market, buyerAssets, units, 0);
+    }
+
+    function invokeBuyWithFee(address adapter, Market calldata market, uint256 buyerAssets, uint256 units, uint256 fee)
+        public
+    {
         bytes32 id = market.hashMarket();
-        IBuyCallback(adapter).onBuy(id, market, buyerAssets, units, 0, adapter, hex"");
+        IBuyCallback(adapter).onBuy(id, market, buyerAssets, units, fee, adapter, hex"");
         token.transferFrom(adapter, address(this), buyerAssets);
         credits[id] = units;
+        pendingFees[id] = fee;
     }
 
     function withdrawable(bytes32 id) external view returns (uint256) {
@@ -134,7 +142,7 @@ contract ExitMidnight {
         returns (uint128, uint128, uint128)
     {
         market;
-        return (uint128(credits[id]), 0, 0);
+        return (uint128(credits[id]), uint128(pendingFees[id]), 0);
     }
 
     function withdraw(Market calldata market, uint256 units, address, address receiver) external {
@@ -312,6 +320,39 @@ contract BlueMidnightAdapterExitTest is Test {
         assertEq(token.balanceOf(address(adapter)), 0);
     }
 
+    function testSafeExitAllowsZeroLossPartialSaleWithExistingBlueLiquidity() public {
+        _seedCredit(100);
+        _allocateBlueLiquidity(70);
+        token.mint(address(midnight), 30);
+        midnight.seed(midnightMarket, 100, 0, 30);
+
+        SafeExit[] memory exits = new SafeExit[](1);
+        exits[0] = SafeExit(_offer(), hex"", 30);
+        bytes memory data = abi.encode(uint8(1), exits, uint256(0));
+        vm.prank(address(vault));
+        adapter.deallocate(data, 100, bytes4(0), address(0));
+
+        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 70);
+        assertEq(token.balanceOf(address(adapter)), 100);
+    }
+
+    function testSafeExitLossUsesAccruedPostCheckpointBookValue() public {
+        _seedCredit(100);
+        midnight.invokeBuyWithFee(address(adapter), midnightMarket, 0, 0, 50);
+        vm.warp(block.timestamp + 15 days);
+        token.mint(address(midnight), 30);
+        midnight.seed(midnightMarket, 70, 0, 30);
+
+        SafeExit[] memory exits = new SafeExit[](1);
+        exits[0] = SafeExit(_offer(), hex"", 30);
+        bytes memory data = abi.encode(uint8(1), exits, uint256(0));
+        vm.expectRevert(BlueMidnightAdapter.ExitLossExceeded.selector);
+        vm.prank(address(vault));
+        adapter.deallocate(data, 30, bytes4(0), address(0));
+
+        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 100);
+    }
+
     function _seedCredit(uint256 assets) internal {
         token.mint(address(vault), assets);
         vm.prank(address(vault));
@@ -319,6 +360,14 @@ contract BlueMidnightAdapterExitTest is Test {
         vm.prank(address(vault));
         adapter.allocate(abi.encode(market), assets, bytes4(0), address(0));
         midnight.invokeBuy(address(adapter), midnightMarket, assets, assets);
+    }
+
+    function _allocateBlueLiquidity(uint256 assets) internal {
+        token.mint(address(vault), assets);
+        vm.prank(address(vault));
+        token.transfer(address(adapter), assets);
+        vm.prank(address(vault));
+        adapter.allocate(abi.encode(market), assets, bytes4(0), address(0));
     }
 
     function _setExitLossLimit(uint256 limit) internal {

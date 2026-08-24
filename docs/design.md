@@ -49,7 +49,10 @@ The implementation must preserve this invariant:
 - Quoter authorization in Midnight or Morpho Blue.
 - Upgradeable proxy contracts in v1.
 - RateDesk application changes inside this repository. This repository may expose ABI artifacts and operator helpers; `k3-ratedesk` integration is a later, separate repository change after contract interfaces stabilize.
-- Mainnet deployment before independent security review.
+- Mainnet deployment before a formal independent external audit, finding
+  remediation/disposition, and explicit deployment approval. Implementation
+  review of the stack is a separate prerequisite and does not substitute for
+  the external audit.
 
 ## 4. Verified source baseline
 
@@ -867,8 +870,11 @@ Deliver:
 - Handler invariants and coverage report.
 - Pilot deployment script/config template with no secrets.
 - ABI artifacts/operator views needed by RateDesk.
+- Deterministic ABI export and verification for the three deployable contracts,
+  including events/errors and the required operator views.
 - `docs/operations.md`, `docs/threat-model.md`, deployment/risk-off runbook.
-- Independent Solidity review request and remediation of blocking findings.
+- Implementation review evidence plus a request for the formal independent
+  external audit and remediation/disposition of blocking findings.
 
 Acceptance:
 
@@ -876,7 +882,9 @@ Acceptance:
 - All security invariants have tests or explicit residual-risk rationale.
 - No plaintext secrets/state/runtime artifacts are committed.
 - Stack view and all PR links are returned for final lead review.
-- Mainnet remains blocked pending independent audit and explicit deployment approval.
+- Mainnet remains blocked pending the formal independent external audit,
+  remediation/disposition of its findings, and explicit deployment approval;
+  implementation review is necessary but not a substitute.
 
 ## 23. Overall definition of done
 

@@ -1,9 +1,31 @@
 # Operations
 
 This repository produces immutable `BlueMidnightAdapter` instances. Stage 6 adds a
-permissionless CREATE2 factory and operator-facing deployment workflow. Mainnet
-use remains blocked until an independent Solidity review is complete and the
-Engineering lead explicitly approves deployment.
+permissionless CREATE2 factory and operator-facing deployment workflow.
+
+**Release gate: mainnet deployment is blocked pending a formal independent
+external audit, remediation or disposition of its findings, and explicit written
+deployment approval from the Engineering lead.** An implementation review (the
+stack/PR review, local tests, invariant evidence, and ABI verification) is
+necessary release evidence but is not the formal external audit and does not
+authorize mainnet deployment.
+
+## Stage 6 release evidence
+
+Export and verify the deterministic ABI artifacts after every Solidity change:
+
+```bash
+python3 script/export_abis.py --write  # only when intentionally refreshing artifacts
+python3 script/export_abis.py --check
+```
+
+The checked artifacts cover `BlueMidnightAdapter`,
+`BlueMidnightAdapterFactory`, and `PolicySetterRatifier`, including their
+events/errors. `docs/abi/operator-views.json` records the required operator
+views: `realAssets`, `expectedSupplyAssets`, `blueAvailableLiquidity`,
+`buyerAssetsBound`, `marketAccounting`, `activeMarketIdsLength`, and
+`activeMarketIdAt`. The script rebuilds production sources with tests skipped,
+sorts ABI entries and keys, and fails on drift or a missing operator view.
 
 ## Preflight
 
@@ -88,5 +110,6 @@ an operator, curator, quoter, or arbitrary receiver.
 A Blue market change is timelocked and cannot activate while the old market has
 supply. Revoke pending changes when incident response requires it. Preserve the
 incident timeline, event logs, exact calldata, and local reproduction before
-attempting recovery. Do not run a mainnet migration while an independent audit
-finding is unresolved.
+trying recovery. Do not run a mainnet migration while the formal external audit
+is incomplete, an audit finding is unresolved, or written deployment approval is
+absent.

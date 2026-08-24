@@ -51,15 +51,22 @@ There is no curator, quoter, or operator rescue path for primary assets.
   remain external dependencies.
 - The local integration suite is deterministic and does not replace a fork or
   independent audit.
-- Mainnet deployment is explicitly blocked until independent Solidity review,
-  remediation of blocker/high findings, and written deployment approval.
+- Mainnet deployment is explicitly blocked until a formal independent external
+  audit is complete, blocker/high findings are remediated or formally
+  dispositioned, and explicit written deployment approval is recorded. The
+  implementation review of this stack and its local evidence is separate from,
+  and cannot substitute for, that external audit.
 - Operator environment variables and RPC endpoints must be supplied out of
   band; no secrets or deployment state belong in this repository.
 
 ## Review checklist
 
-Before release, independently verify constructor immutables, every external
-call and callback ordering, accounting bounds and rounding, timelock selector
-binding, root epoch invalidation, receiver pinning, exact-or-revert exits,
-active-market loop bounds, and all invariant handlers. Record findings and their
-remediation commit in the release change record.
+Before release, the implementation reviewer should independently verify
+constructor immutables, every external call and callback ordering, accounting
+bounds and rounding, timelock selector binding, root epoch invalidation,
+receiver pinning, exact-or-revert exits, active-market loop bounds, all
+invariant handlers, and deterministic ABI artifacts. Record implementation
+findings and their remediation commit in the release change record. Separately,
+obtain the formal independent external audit and record its findings,
+remediation/disposition, and explicit deployment approval; neither local
+implementation review nor passing tests is that approval.

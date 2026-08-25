@@ -254,7 +254,13 @@ contract BlueMidnightAdapterAccountingTest is Test {
         morpho = new AccountingMorphoMock(address(token));
         midnight = new AccountingMidnightMock(address(token));
         ratifier = new PolicySetterRatifier(address(midnight));
-        adapter = new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(ratifier), AdapterTestMarket.make(address(midnight), address(token)));
+        adapter = new BlueMidnightAdapter(
+            address(vault),
+            address(midnight),
+            address(morpho),
+            address(ratifier),
+            AdapterTestMarket.make(address(midnight), address(token))
+        );
         midnight.setRatifier(ratifier);
         blueMarket = MarketParams(address(token), address(1), address(2), address(3), 0);
         bytes memory blueData = abi.encodeWithSelector(adapter.setBlueMarket.selector, blueMarket);
@@ -285,18 +291,6 @@ contract BlueMidnightAdapterAccountingTest is Test {
         morpho.setBalances(blueMarket.id(), 1_000_000, 1_000_000_000_000, 0, 1_000_000_000_000);
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
     function testStatefulBuyRejectsUnapprovedAndMismatchedRoots() public {
         Offer memory offer = _validBuyOffer(100);
         bytes32 root = HashLib.hashOffer(offer);
@@ -308,16 +302,6 @@ contract BlueMidnightAdapterAccountingTest is Test {
         vm.expectRevert(IPolicySetterRatifier.InvalidProof.selector);
         midnight.takeMakerBuy(adapter, offer, abi.encode(mismatchedRoot, 0, new bytes32[](0)), 100, 100, 0);
     }
-
-
-
-
-
-
-
-
-
-
 
     function _assertAccounting(
         bytes32 marketId,
@@ -364,10 +348,6 @@ contract BlueMidnightAdapterAccountingTest is Test {
             0
         );
     }
-
-
-
-
 
     function testImmediateTighteningBumpsEpochAndRejectsLoosening() public {
         uint64 before = adapter.policyEpoch();
@@ -418,9 +398,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
 
     function _enableMarket(BlueMidnightAdapter, bytes32) internal pure {}
 
-    function _rejectEconomicPolicy(BlueMidnightAdapter target, MarketEconomicPolicy memory policy)
-        internal
-    {
+    function _rejectEconomicPolicy(BlueMidnightAdapter target, MarketEconomicPolicy memory policy) internal {
         uint64 before = target.policyEpoch();
         bytes memory data = abi.encodeWithSelector(target.setMarketEconomicPolicy.selector, policy);
         target.submit(data);
@@ -438,8 +416,6 @@ contract BlueMidnightAdapterAccountingTest is Test {
         adapter.tightenMarketEconomicPolicy(policy);
         assertEq(adapter.policyEpoch(), expectedEpoch);
     }
-
-
 
     function testTighteningEnforcesAllFieldsAndSentinelAuthorization() public {
         MarketEconomicPolicy memory initial = _policy(100, 10, 31 days, 30 days, 10, 20);
@@ -465,10 +441,4 @@ contract BlueMidnightAdapterAccountingTest is Test {
         _assertTighteningRejected(_policy(99, 11, 30 days, 29 days, 9, 20), tightenedEpoch);
         _assertTighteningRejected(_policy(99, 11, 30 days, 29 days, 9, 19), tightenedEpoch);
     }
-
-
-
-
-
-
 }

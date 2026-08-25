@@ -6,17 +6,32 @@ import {BlueMidnightAdapter} from "../../src/BlueMidnightAdapter.sol";
 import {Market, CollateralParams} from "midnight/interfaces/IMidnight.sol";
 
 contract TimelockToken {
-    function approve(address, uint256) external pure returns (bool) { return true; }
+    function approve(address, uint256) external pure returns (bool) {
+        return true;
+    }
 }
 
 contract TimelockVault {
     address public immutable token;
     address public curator;
     mapping(address => bool) public sentinels;
-    constructor(address _token) { token = _token; curator = msg.sender; }
-    function asset() external view returns (address) { return token; }
-    function isSentinel(address account) external view returns (bool) { return sentinels[account]; }
-    function setSentinel(address account, bool enabled) external { sentinels[account] = enabled; }
+
+    constructor(address _token) {
+        token = _token;
+        curator = msg.sender;
+    }
+
+    function asset() external view returns (address) {
+        return token;
+    }
+
+    function isSentinel(address account) external view returns (bool) {
+        return sentinels[account];
+    }
+
+    function setSentinel(address account, bool enabled) external {
+        sentinels[account] = enabled;
+    }
 }
 
 contract BlueMidnightAdapterTimelockTest is Test {
@@ -27,11 +42,22 @@ contract BlueMidnightAdapterTimelockTest is Test {
     function setUp() public {
         token = new TimelockToken();
         vault = new TimelockVault(address(token));
-        adapter = new BlueMidnightAdapter(address(vault), address(4), address(5), address(6), Market({
-            chainId: block.chainid, midnight: address(4), loanToken: address(token),
-            collateralParams: new CollateralParams[](0), maturity: block.timestamp + 30 days,
-            rcfThreshold: 0, enterGate: address(0), liquidatorGate: address(0)
-        }));
+        adapter = new BlueMidnightAdapter(
+            address(vault),
+            address(4),
+            address(5),
+            address(6),
+            Market({
+                chainId: block.chainid,
+                midnight: address(4),
+                loanToken: address(token),
+                collateralParams: new CollateralParams[](0),
+                maturity: block.timestamp + 30 days,
+                rcfThreshold: 0,
+                enterGate: address(0),
+                liquidatorGate: address(0)
+            })
+        );
     }
 
     function testCuratorCanSubmitAndExecuteQuoterTimelock() public {

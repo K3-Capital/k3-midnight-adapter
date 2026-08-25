@@ -141,7 +141,13 @@ contract Stage6HandlerInvariantTest is Test {
         vault = new ExitVault(address(token));
         morpho = new ExitMorpho(address(token));
         midnight = new ExitMidnight(address(token));
-        adapter = new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(5), AdapterTestMarket.make(address(midnight), address(token)));
+        adapter = new BlueMidnightAdapter(
+            address(vault),
+            address(midnight),
+            address(morpho),
+            address(5),
+            AdapterTestMarket.make(address(midnight), address(token))
+        );
         blueMarket = MarketParams(address(token), address(1), address(2), address(3), 0);
         _execute(abi.encodeWithSelector(adapter.setBlueMarket.selector, blueMarket));
 

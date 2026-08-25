@@ -18,7 +18,9 @@ contract SolvencyInvariantTest is Test {
         token = new ExitToken();
         vault = new ExitVault(address(token));
         morpho = new ExitMorpho(address(token));
-        adapter = new BlueMidnightAdapter(address(vault), address(4), address(morpho), address(5), AdapterTestMarket.make(address(4), address(token)));
+        adapter = new BlueMidnightAdapter(
+            address(vault), address(4), address(morpho), address(5), AdapterTestMarket.make(address(4), address(token))
+        );
         market = MarketParams(address(token), address(1), address(2), address(3), 0);
         bytes memory data = abi.encodeWithSelector(adapter.setBlueMarket.selector, market);
         adapter.submit(data);

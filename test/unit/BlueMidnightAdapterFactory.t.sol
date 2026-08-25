@@ -22,9 +22,23 @@ contract BlueMidnightAdapterFactoryTest is Test {
 
     function testPredictMatchesCreate2Deployment() public {
         bytes32 salt = keccak256("pilot-usdc");
-        address predicted = factory.predict(salt, address(vault), address(4), address(morpho), address(5), AdapterTestMarket.make(address(4), address(token)));
+        address predicted = factory.predict(
+            salt,
+            address(vault),
+            address(4),
+            address(morpho),
+            address(5),
+            AdapterTestMarket.make(address(4), address(token))
+        );
 
-        address deployed = factory.deploy(salt, address(vault), address(4), address(morpho), address(5), AdapterTestMarket.make(address(4), address(token)));
+        address deployed = factory.deploy(
+            salt,
+            address(vault),
+            address(4),
+            address(morpho),
+            address(5),
+            AdapterTestMarket.make(address(4), address(token))
+        );
 
         assertEq(deployed, predicted);
         assertEq(BlueMidnightAdapter(deployed).factory(), address(factory));
@@ -34,8 +48,22 @@ contract BlueMidnightAdapterFactoryTest is Test {
 
     function testSameSaltSupportsDistinctConfigurations() public {
         bytes32 salt = keccak256("same-human-readable-salt");
-        address first = factory.deploy(salt, address(vault), address(4), address(morpho), address(5), AdapterTestMarket.make(address(4), address(token)));
-        address second = factory.deploy(salt, address(vault), address(6), address(morpho), address(5), AdapterTestMarket.make(address(6), address(token)));
+        address first = factory.deploy(
+            salt,
+            address(vault),
+            address(4),
+            address(morpho),
+            address(5),
+            AdapterTestMarket.make(address(4), address(token))
+        );
+        address second = factory.deploy(
+            salt,
+            address(vault),
+            address(6),
+            address(morpho),
+            address(5),
+            AdapterTestMarket.make(address(6), address(token))
+        );
 
         assertTrue(first != second);
         assertEq(BlueMidnightAdapter(second).midnight(), address(6));
@@ -43,14 +71,35 @@ contract BlueMidnightAdapterFactoryTest is Test {
 
     function testZeroSaltRejected() public {
         vm.expectRevert(BlueMidnightAdapterFactory.InvalidSalt.selector);
-        factory.deploy(bytes32(0), address(vault), address(4), address(morpho), address(5), AdapterTestMarket.make(address(4), address(token)));
+        factory.deploy(
+            bytes32(0),
+            address(vault),
+            address(4),
+            address(morpho),
+            address(5),
+            AdapterTestMarket.make(address(4), address(token))
+        );
     }
 
     function testDuplicateDeploymentRejected() public {
         bytes32 salt = keccak256("duplicate");
-        factory.deploy(salt, address(vault), address(4), address(morpho), address(5), AdapterTestMarket.make(address(4), address(token)));
+        factory.deploy(
+            salt,
+            address(vault),
+            address(4),
+            address(morpho),
+            address(5),
+            AdapterTestMarket.make(address(4), address(token))
+        );
 
         vm.expectRevert();
-        factory.deploy(salt, address(vault), address(4), address(morpho), address(5), AdapterTestMarket.make(address(4), address(token)));
+        factory.deploy(
+            salt,
+            address(vault),
+            address(4),
+            address(morpho),
+            address(5),
+            AdapterTestMarket.make(address(4), address(token))
+        );
     }
 }

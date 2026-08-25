@@ -187,7 +187,13 @@ contract BlueMidnightAdapterExitTest is Test {
         vault = new ExitVault(address(token));
         morpho = new ExitMorpho(address(token));
         midnight = new ExitMidnight(address(token));
-        adapter = new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(5), AdapterTestMarket.make(address(midnight), address(token)));
+        adapter = new BlueMidnightAdapter(
+            address(vault),
+            address(midnight),
+            address(morpho),
+            address(5),
+            AdapterTestMarket.make(address(midnight), address(token))
+        );
         market = MarketParams(address(token), address(1), address(2), address(3), 0);
         bytes memory data = abi.encodeWithSelector(adapter.setBlueMarket.selector, market);
         adapter.submit(data);
@@ -258,16 +264,6 @@ contract BlueMidnightAdapterExitTest is Test {
         vm.expectRevert(BlueMidnightAdapter.TimelockNotExpired.selector);
         adapter.setExitLossLimit(10);
     }
-
-
-
-
-
-
-
-
-
-
 
     function _seedCredit(uint256 assets) internal {
         token.mint(address(vault), assets);

@@ -85,11 +85,20 @@ The script verifies every constructor value and runtime code hash before the
 deployment is accepted for Vault registration. Query `parentVault`, `asset`,
 `midnight`, `morphoBlue`, `ratifier`, `approvedQuoter`, and both market IDs.
 
-The current build reports 18,991 runtime bytes and 23,335 creation bytes. The
+The current build reports 18,991 runtime bytes and 23,307 creation bytes. The
 runtime delta versus the approved Stage 3 measurement (22,916 bytes) is -3,925
 bytes. `runtime_bytes * 200` is only the EVM runtime code-deposit component
-(3,798,200 gas); it is not total deployment gas. Total gas must be captured from
-the target chain transaction receipt or a chain-specific gas estimate.
+(3,798,200 gas). The reproducible local direct-CREATE fixture is:
+
+```sh
+forge test --match-path test/unit/DeployPilot.t.sol \
+  --match-test testDirectDeploymentRecordsReproducibleConstructorGas -vvvv
+```
+
+It reports 4,151,152 gas for the constructor transaction in Foundry's local
+EVM. This is a reproducible fixture measurement, not a target-chain receipt;
+production total gas must still be captured from the target-chain transaction
+receipt or a chain-specific gas estimate.
 
 ## Initial configuration
 

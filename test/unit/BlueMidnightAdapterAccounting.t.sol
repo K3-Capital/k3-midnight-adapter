@@ -47,6 +47,7 @@ contract AccountingVaultMock {
     address public immutable token;
     address public immutable curator;
     mapping(address => bool) public sentinels;
+    mapping(bytes32 => uint256) public allocations;
 
     constructor(address token_) {
         token = token_;
@@ -63,6 +64,14 @@ contract AccountingVaultMock {
 
     function setSentinel(address account, bool enabled) external {
         sentinels[account] = enabled;
+    }
+
+    function allocation(bytes32 id) external view returns (uint256) {
+        return allocations[id];
+    }
+
+    function setAllocation(bytes32 id, uint256 amount) external {
+        allocations[id] = amount;
     }
 }
 
@@ -254,12 +263,9 @@ contract BlueMidnightAdapterAccountingTest is Test {
         morpho = new AccountingMorphoMock(address(token));
         midnight = new AccountingMidnightMock(address(token));
         ratifier = new PolicySetterRatifier(address(midnight));
+        midnightMarket = AdapterTestMarket.make(address(midnight), address(token));
         adapter = new BlueMidnightAdapter(
-            address(vault),
-            address(midnight),
-            address(morpho),
-            address(ratifier),
-            AdapterTestMarket.make(address(midnight), address(token))
+            address(vault), address(midnight), address(morpho), address(ratifier), midnightMarket
         );
         midnight.setRatifier(ratifier);
         blueMarket = MarketParams(address(token), address(1), address(2), address(3), 0);
@@ -267,8 +273,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
         adapter.submit(blueData);
         vm.warp(adapter.executableAt(blueData));
         adapter.setBlueMarket(blueMarket);
-        midnightMarket = AdapterTestMarket.make(address(midnight), address(token));
-        midnightId = adapter.pinnedMidnightMarketId();
+        midnightId = adapter.pinnedMidnightMarketHash();
         MarketEconomicPolicy memory economicPolicy = MarketEconomicPolicy({
             maxBuyTick: 100,
             minSellTick: 10,
@@ -287,6 +292,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
         adapter.submit(quoterData);
         vm.warp(adapter.executableAt(quoterData));
         adapter.setQuoter(address(this), true);
+        vault.setAllocation(adapter.adapterId(), 1_000_000);
         token.mint(address(morpho), 1_000_000);
         morpho.setBalances(blueMarket.id(), 1_000_000, 1_000_000_000_000, 0, 1_000_000_000_000);
     }
@@ -301,6 +307,57 @@ contract BlueMidnightAdapterAccountingTest is Test {
         bytes32 mismatchedRoot = keccak256("different-root");
         vm.expectRevert(IPolicySetterRatifier.InvalidProof.selector);
         midnight.takeMakerBuy(adapter, offer, abi.encode(mismatchedRoot, 0, new bytes32[](0)), 100, 100, 0);
+    }
+
+    function testBuyAccruesClaimFromFillTimeUntilMaturity() public {
+        uint256 fillTime = midnightMarket.maturity - 20 days;
+        vm.warp(fillTime);
+        uint256 initialNav = adapter.realAssets();
+
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 20);
+        _assertAccounting(midnightId, 100, 120, 100, uint40(fillTime), true);
+        assertEq(adapter.realAssets(), initialNav);
+
+        vm.warp(fillTime + 10 days);
+        assertEq(adapter.realAssets(), initialNav + 10);
+        vm.warp(midnightMarket.maturity);
+        assertEq(adapter.realAssets(), initialNav + 20);
+        vm.warp(midnightMarket.maturity + 1 days);
+        assertEq(adapter.realAssets(), initialNav + 20);
+    }
+
+    function testLossSynchronizationAndPartialSellPreserveLoss() public {
+        uint256 fillTime = midnightMarket.maturity - 20 days;
+        vm.warp(fillTime);
+        uint256 initialNav = adapter.realAssets();
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 101, 100, 23);
+        midnight.setPosition(IdLib.toId(midnightMarket), 83, 7);
+        assertEq(adapter.realAssets(), initialNav - 11);
+
+        midnight.takeMakerSell(adapter, midnightId, midnightMarket, 30, 37, 0);
+        MarketAccounting memory afterSale = adapter.marketAccounting(midnightId);
+        assertEq(afterSale.bookValue, 46);
+        assertEq(afterSale.netMaturityClaim, 53);
+        assertEq(afterSale.trackedCredit, 46);
+        assertEq(adapter.realAssets(), initialNav - 25);
+    }
+
+    function testPartialSellReducesClaimExactlyOnce() public {
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 3);
+        midnight.takeMakerSell(adapter, midnightId, midnightMarket, 50, 50, 2);
+
+        MarketAccounting memory a = adapter.marketAccounting(midnightId);
+        assertEq(a.trackedCredit, 50);
+        assertEq(a.bookValue, 50);
+        assertEq(a.netMaturityClaim, 51);
+    }
+
+    function testQuoterRevocationRejectsNewRootApproval() public {
+        bytes32 root = keccak256("revoked-quoter-root");
+        vault.setSentinel(address(this), true);
+        adapter.revokeQuoter(address(this));
+        vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
+        adapter.approveRoot(root);
     }
 
     function _assertAccounting(

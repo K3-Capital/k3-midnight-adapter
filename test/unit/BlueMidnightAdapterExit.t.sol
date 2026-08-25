@@ -43,6 +43,7 @@ contract ExitVault {
     address public immutable token;
     address public immutable curator;
     mapping(address => bool) public sentinels;
+    mapping(bytes32 => uint256) public allocations;
 
     constructor(address token_) {
         token = token_;
@@ -59,6 +60,14 @@ contract ExitVault {
 
     function setSentinel(address account, bool enabled) external {
         sentinels[account] = enabled;
+    }
+
+    function allocation(bytes32 id) external view returns (uint256) {
+        return allocations[id];
+    }
+
+    function setAllocation(bytes32 id, uint256 amount) external {
+        allocations[id] = amount;
     }
 }
 
@@ -187,34 +196,21 @@ contract BlueMidnightAdapterExitTest is Test {
         vault = new ExitVault(address(token));
         morpho = new ExitMorpho(address(token));
         midnight = new ExitMidnight(address(token));
-        adapter = new BlueMidnightAdapter(
-            address(vault),
-            address(midnight),
-            address(morpho),
-            address(5),
-            AdapterTestMarket.make(address(midnight), address(token))
-        );
+        midnightMarket = AdapterTestMarket.make(address(midnight), address(token));
+        adapter =
+            new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(5), midnightMarket);
         market = MarketParams(address(token), address(1), address(2), address(3), 0);
         bytes memory data = abi.encodeWithSelector(adapter.setBlueMarket.selector, market);
         adapter.submit(data);
         vm.warp(adapter.executableAt(data));
         adapter.setBlueMarket(market);
-        midnightMarket = Market({
-            chainId: block.chainid,
-            midnight: address(midnight),
-            loanToken: address(token),
-            collateralParams: new CollateralParams[](0),
-            maturity: block.timestamp + 30 days,
-            rcfThreshold: 0,
-            enterGate: address(0),
-            liquidatorGate: address(0)
-        });
-        midnightMarketId = HashLib.hashMarket(midnightMarket);
+        midnightMarketId = adapter.pinnedMidnightMarketHash();
         MarketEconomicPolicy memory policy = MarketEconomicPolicy(1_000, 0, 30 days, 20 days, 0, 0, true);
         data = abi.encodeWithSelector(adapter.setMarketEconomicPolicy.selector, policy);
         adapter.submit(data);
         vm.warp(adapter.executableAt(data));
         adapter.setMarketEconomicPolicy(policy);
+        vault.setAllocation(adapter.adapterId(), type(uint256).max);
     }
 
     function testRiskOffPreservesSynchronousRecovery() public {
@@ -263,6 +259,64 @@ contract BlueMidnightAdapterExitTest is Test {
         assertGt(adapter.executableAt(data), block.timestamp);
         vm.expectRevert(BlueMidnightAdapter.TimelockNotExpired.selector);
         adapter.setExitLossLimit(10);
+    }
+
+    function testRiskOffRejectsBuyButAllowsRepaymentAndReducingSell() public {
+        _seedCredit(100);
+        token.mint(address(midnight), 25);
+        midnight.seed(midnightMarket, 100, 25, 0);
+
+        vault.setSentinel(sentinel, true);
+        vm.prank(sentinel);
+        adapter.riskOff(bytes32("repayment"));
+
+        vm.expectRevert(BlueMidnightAdapter.ExposureExceeded.selector);
+        midnight.invokeBuy(address(adapter), midnightMarket, 1, 1);
+
+        uint256 collected = adapter.collectRepayments(25);
+        assertEq(collected, 25);
+        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 75);
+
+        token.mint(address(midnight), 75);
+        midnight.seed(midnightMarket, 75, 0, 75);
+        midnight.take(_offer(), hex"", 75, address(adapter), address(adapter), address(adapter), hex"");
+        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 0);
+    }
+
+    function testSafeExitSucceedsAfterMarketDisableAndReportsLoss() public {
+        _seedCredit(100);
+        _setExitLossLimit(20);
+        token.mint(address(midnight), 80);
+        midnight.seed(midnightMarket, 100, 0, 80);
+        vault.setSentinel(sentinel, true);
+        vm.prank(sentinel);
+        adapter.disableMarket();
+
+        SafeExit[] memory exits = new SafeExit[](1);
+        exits[0] = SafeExit(_offer(), hex"", 100);
+        bytes memory data = abi.encode(uint8(1), exits, uint256(20));
+        vm.prank(address(vault));
+        adapter.deallocate(data, 80, bytes4(0), address(0));
+
+        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 0);
+        assertEq(token.balanceOf(address(adapter)), 80);
+    }
+
+    function testSafeExitRejectsLossAboveConfiguredLimitWithoutDrift() public {
+        _seedCredit(100);
+        _setExitLossLimit(10);
+        token.mint(address(midnight), 80);
+        midnight.seed(midnightMarket, 100, 0, 80);
+
+        SafeExit[] memory exits = new SafeExit[](1);
+        exits[0] = SafeExit(_offer(), hex"", 100);
+        bytes memory data = abi.encode(uint8(1), exits, uint256(10));
+        vm.expectRevert(BlueMidnightAdapter.ExitLossExceeded.selector);
+        vm.prank(address(vault));
+        adapter.deallocate(data, 80, bytes4(0), address(0));
+
+        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 100);
+        assertEq(token.balanceOf(address(adapter)), 0);
     }
 
     function _seedCredit(uint256 assets) internal {

@@ -30,6 +30,7 @@ OPERATOR_VIEWS: dict[str, tuple[str, ...]] = {
         "buyerAssetsBound",
         "marketAccounting",
         "pinnedMidnightMarketId",
+        "pinnedMidnightMarketHash",
     ),
 }
 

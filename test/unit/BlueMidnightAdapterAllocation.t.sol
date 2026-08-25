@@ -37,6 +37,7 @@ contract AllocationToken {
 contract AllocationVault {
     address public immutable token;
     address public curator;
+    mapping(bytes32 => uint256) public allocations;
 
     constructor(address _token) {
         token = _token;
@@ -49,6 +50,14 @@ contract AllocationVault {
 
     function isSentinel(address) external pure returns (bool) {
         return false;
+    }
+
+    function allocation(bytes32 id) external view returns (uint256) {
+        return allocations[id];
+    }
+
+    function setAllocation(bytes32 id, uint256 amount) external {
+        allocations[id] = amount;
     }
 }
 
@@ -100,6 +109,10 @@ contract AllocationMorpho {
         markets[Id.unwrap(id)][0] = supplyAssets;
         markets[Id.unwrap(id)][1] = supplyShares;
         markets[Id.unwrap(id)][2] = borrowAssets;
+    }
+
+    function setShares(Id id, uint256 amount) external {
+        shares[Id.unwrap(id)] = amount;
     }
 }
 
@@ -187,5 +200,22 @@ contract BlueMidnightAdapterAllocationTest is Test {
         assertEq(adapter.expectedSupplyAssets(), 500_000);
         assertFalse(adapter.riskOffActive());
         assertEq(adapter.blueAvailableLiquidity(), 100_000);
+    }
+
+    function testBuyerBoundUsesOnlyVaultAllocationAndBlueLiquidity() public {
+        _configure();
+        token.mint(address(vault), 1_000);
+        vm.prank(address(vault));
+        token.transfer(address(adapter), 1_000);
+        vm.prank(address(vault));
+        adapter.allocate(abi.encode(market), 1_000, bytes4(0), address(0));
+        morpho.setShares(market.id(), 4_000_000);
+        morpho.setMarket(market.id(), 1_000, 4_000_000, 200);
+        vault.setAllocation(adapter.adapterId(), 700);
+
+        assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 700);
+
+        morpho.setMarket(market.id(), 1_000, 2_000_000, 800);
+        assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 200);
     }
 }

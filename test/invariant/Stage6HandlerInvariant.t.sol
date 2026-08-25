@@ -84,7 +84,9 @@ contract Stage6AdapterHandler is Test {
         if (units == 0) return;
         token.mint(address(midnight), units);
         midnight.seed(midnightMarket, credit, 0, units);
-        midnight.take(_offer(), hex"", units, address(adapter), address(adapter), address(adapter), hex"");
+        Offer memory offer = _offer(units);
+        if (!adapter.acceptsOffer(offer)) return;
+        midnight.take(offer, hex"", units, address(0xCAFE), address(adapter), address(adapter), hex"");
     }
 
     function riskOff() external {
@@ -93,22 +95,22 @@ contract Stage6AdapterHandler is Test {
         adapter.riskOff(bytes32("handler-risk-off"));
     }
 
-    function _offer() internal view returns (Offer memory) {
+    function _offer(uint256 units) internal view returns (Offer memory) {
         return Offer({
             market: midnightMarket,
-            buy: true,
-            maker: address(0xCAFE),
+            buy: false,
+            maker: address(adapter),
             start: block.timestamp,
             expiry: block.timestamp + 1 days,
             tick: 1,
-            group: bytes32(0),
-            callback: address(0),
+            group: keccak256(abi.encode(address(adapter), adapter.policyEpoch())),
+            callback: address(adapter),
             callbackData: hex"",
-            receiverIfMakerIsSeller: address(0),
+            receiverIfMakerIsSeller: address(adapter),
             ratifier: address(5),
-            reduceOnly: false,
-            maxUnits: 0,
-            maxAssets: type(uint128).max,
+            reduceOnly: true,
+            maxUnits: uint128(units),
+            maxAssets: 0,
             continuousFeeCap: 0
         });
     }

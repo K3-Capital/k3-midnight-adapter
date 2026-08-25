@@ -3,7 +3,6 @@ pragma solidity 0.8.34;
 
 import {MarketParams} from "morpho-blue/interfaces/IMorpho.sol";
 
-
 /// @dev Shared data shapes only; behavior is intentionally deferred to later stack layers.
 struct BlueMarketConfig {
     MarketParams market;

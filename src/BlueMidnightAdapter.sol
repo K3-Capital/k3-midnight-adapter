@@ -7,11 +7,7 @@ import {SafeERC20Lib} from "vault-v2/libraries/SafeERC20Lib.sol";
 import {IMorpho, Market, MarketParams, Position, Id} from "morpho-blue/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "morpho-blue/libraries/MarketParamsLib.sol";
 import {SharesMathLib} from "morpho-blue/libraries/SharesMathLib.sol";
-import {
-    BlueMarketConfig,
-    MarketAccounting,
-    MarketEconomicPolicy
-} from "./types/AdapterTypes.sol";
+import {BlueMarketConfig, MarketAccounting, MarketEconomicPolicy} from "./types/AdapterTypes.sol";
 import {IBlueMidnightAdapter} from "./interfaces/IBlueMidnightAdapter.sol";
 import {IMidnight, Market as MidnightMarket, Offer} from "midnight/interfaces/IMidnight.sol";
 import {CALLBACK_SUCCESS, MAX_CONTINUOUS_FEE, MAX_SETTLEMENT_FEE_360_DAYS} from "midnight/libraries/ConstantsLib.sol";
@@ -307,20 +303,20 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (!blueMarketConfigured || data.length == 0) revert InvalidMarket();
         MarketParams memory market = abi.decode(data, (MarketParams));
         if (Id.unwrap(market.id()) != blue.marketId) revert InvalidMarket();
-        uint256 oldAssets = expectedSupplyAssets();
         uint256 withdrawn;
         uint256 burnedShares;
         if (assets != 0) {
             uint256 cash = IERC20(asset).balanceOf(address(this));
             if (cash < assets) {
                 uint256 needed = assets - cash;
-                (withdrawn, burnedShares) = IMorpho(morphoBlue).withdraw(market, needed, 0, address(this), address(this));
+                (withdrawn, burnedShares) =
+                    IMorpho(morphoBlue).withdraw(market, needed, 0, address(this), address(this));
                 if (withdrawn != needed) revert InsufficientLiquidity();
             }
         }
-        uint256 newAssets = expectedSupplyAssets();
         ids = _ids();
-        change = int256(newAssets) - int256(oldAssets);
+        // Vault pulls the full requested amount from the adapter, including adapter cash.
+        change = -int256(assets);
         emit Deallocate(blue.marketId, withdrawn, burnedShares);
     }
 
@@ -330,6 +326,8 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (!marketKnown(pinnedMidnightMarketHash)) revert InvalidMarket();
         uint256 units = requestedUnits;
         uint256 available = IMidnight(midnight).withdrawable(pinnedMidnightMarketId);
+        uint256 credit = accountingState.trackedCredit;
+        if (available > credit) available = credit;
         if (units == 0 || units > available) units = available;
         if (units == 0) revert RepaymentUnavailable();
         _checkpoint(pinnedMidnightMarketHash, pinnedMidnightMarket, 0, 0);
@@ -352,11 +350,17 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     {
         if (offer.maker != address(this) || offer.buy || !acceptsOffer(offer)) revert InvalidOffer();
         if (units == 0 || units > offer.maxUnits) revert InvalidOffer();
-        (, sellerAssets) = IMidnight(midnight)
-            .take(offer, ratifierData, units, address(this), address(this), address(this), hex"");
+        (, sellerAssets) =
+            IMidnight(midnight).take(offer, ratifierData, units, msg.sender, address(this), address(this), hex"");
     }
 
     function realAssets() external view returns (uint256) {
+        return IERC20(asset).balanceOf(address(this)) + expectedSupplyAssets() + _conservativeBookValue();
+    }
+
+    /// @notice Immediate liquidity available to satisfy a Vault withdrawal.
+    /// @dev Unlike realAssets, this excludes open Midnight face value and caps Blue assets by market cash.
+    function immediateLiquidity() external view returns (uint256) {
         uint256 blueLiquidity = blueAvailableLiquidity();
         uint256 expected = expectedSupplyAssets();
         if (expected > blueLiquidity) expected = blueLiquidity;
@@ -413,8 +417,8 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         bytes32 protocolMarketId = IdLib.toId(offer.market);
         MarketEconomicPolicy memory policy = marketEconomicPolicy;
         if (
-            marketId != pinnedMidnightMarketHash || (!marketEnabled && offer.buy) || !marketKnown(marketId) || !policy.configured
-                || offer.start > block.timestamp
+            marketId != pinnedMidnightMarketHash || (!marketEnabled && offer.buy) || !marketKnown(marketId)
+                || !policy.configured || offer.start > block.timestamp
         ) {
             return false;
         }

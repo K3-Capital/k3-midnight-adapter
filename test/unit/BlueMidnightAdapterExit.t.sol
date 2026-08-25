@@ -146,6 +146,14 @@ contract ExitMidnight {
         return available[id];
     }
 
+    function continuousFee(bytes32) external pure returns (uint256) {
+        return 0;
+    }
+
+    function settlementFee(bytes32, uint256) external pure returns (uint256) {
+        return 0;
+    }
+
     function updatePositionView(Market calldata market, bytes32 id, address)
         external
         view
@@ -170,12 +178,13 @@ contract ExitMidnight {
         address takerCallback,
         bytes calldata takerCallbackData
     ) external returns (uint256, uint256) {
+        require(taker != offer.maker, "self-take");
         bytes32 id = IdLib.toId(offer.market);
         uint256 sellerAssets = saleAssets[id];
         credits[id] -= units;
         token.transfer(receiverIfTakerIsSeller, sellerAssets);
         ISellCallback(takerCallback)
-            .onSell(id, offer.market, sellerAssets, units, 0, taker, receiverIfTakerIsSeller, takerCallbackData);
+            .onSell(id, offer.market, sellerAssets, units, 0, offer.maker, receiverIfTakerIsSeller, takerCallbackData);
         return (0, sellerAssets);
     }
 }
@@ -261,6 +270,14 @@ contract BlueMidnightAdapterExitTest is Test {
         uint256 collected = adapter.collectRepayment(25);
         assertEq(collected, 25);
         assertEq(adapter.accounting().trackedCredit, 75);
+
+        token.mint(address(midnight), 75);
+        midnight.seed(midnightMarket, 75, 0, 75);
+        Offer memory offer = _sellOffer(75);
+        assertTrue(adapter.acceptsOffer(offer));
+        uint256 sellerAssets = adapter.executeMakerSell(offer, hex"", 75);
+        assertEq(sellerAssets, 75);
+        assertEq(adapter.accounting().trackedCredit, 0);
     }
 
     function testDeallocateUsesAdapterCashBeforeBlue() public {
@@ -310,4 +327,23 @@ contract BlueMidnightAdapterExitTest is Test {
         });
     }
 
+    function _sellOffer(uint256 units) internal view returns (Offer memory) {
+        return Offer({
+            market: midnightMarket,
+            buy: false,
+            maker: address(adapter),
+            start: block.timestamp,
+            expiry: block.timestamp + 1 days,
+            tick: 1,
+            group: keccak256(abi.encode(address(adapter), adapter.policyEpoch())),
+            callback: address(adapter),
+            callbackData: hex"",
+            receiverIfMakerIsSeller: address(adapter),
+            ratifier: address(5),
+            reduceOnly: true,
+            maxUnits: uint128(units),
+            maxAssets: 0,
+            continuousFeeCap: 0
+        });
+    }
 }

@@ -27,6 +27,7 @@ OPERATOR_VIEWS: dict[str, tuple[str, ...]] = {
         "realAssets",
         "expectedSupplyAssets",
         "blueAvailableLiquidity",
+        "immediateLiquidity",
         "buyerAssetsBound",
         "accounting",
         "pinnedMidnightMarketId",

@@ -41,12 +41,26 @@ forge fmt --check
 forge build
 forge test --match-path 'test/integration/**' -vvv
 forge test --summary
+python3 script/check_release_gate.py
 ```
 
 The script uses temporary source roots and removes them on exit. If compiler
 downloads are unavailable, install the pinned compiler versions through the
 normal Foundry toolchain or provide network access, then rerun the same
 sequence; do not commit `out/`, `out-pinned/`, or compiler caches.
+
+The release gate forcibly selects the named `deployment` profile (Solidity
+0.8.34, Osaka EVM, optimizer runs 200, via-IR) and rebuilds before measuring
+artifacts. It rejects `BlueMidnightAdapter` at 20,000 runtime bytes or above,
+and rejects every deployable production contract at the EIP-170 limit of
+24,576 bytes. The current measurements are:
+
+| Contract | Runtime bytes | Creation bytes |
+| --- | ---: | ---: |
+| `BlueMidnightAdapter` | 18,991 | 23,307 |
+| `PolicySetterRatifier` | 4,229 | 4,362 |
+
+Run the gate from a clean checkout; its `out/` output is disposable and ignored.
 
 ## Preflight
 

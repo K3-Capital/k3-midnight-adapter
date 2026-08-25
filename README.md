@@ -24,4 +24,12 @@ git submodule update --init --recursive
 forge fmt --check
 forge build
 forge test --summary
+python3 script/check_release_gate.py
+python3 script/export_abis.py --check
 ```
+
+Release bytecode is measured only with the deterministic `deployment` profile
+(Solidity 0.8.34, Osaka EVM, optimizer runs 200, via-IR). The gate rejects
+`BlueMidnightAdapter` at 20,000 runtime bytes and every deployable production
+contract at EIP-170's 24,576-byte limit. Generated Foundry output is disposable
+and must not be committed.

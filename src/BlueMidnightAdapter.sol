@@ -579,7 +579,10 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         a.trackedCredit = _toUint128(uint256(a.trackedCredit) - units);
         // Midnight has already reduced seller credit and pending fee. The proportional reduction above applies
         // the sale once; only a stricter post-sale protocol claim may reduce the remaining claim further.
-        if (postSaleClaim < a.netMaturityClaim) a.netMaturityClaim = _toUint128(postSaleClaim);
+        if (postSaleClaim < a.netMaturityClaim) {
+            a.netMaturityClaim = _toUint128(postSaleClaim);
+            if (postSaleClaim < a.bookValue) a.bookValue = _toUint128(postSaleClaim);
+        }
         int256 pnl = int256(sellerAssets) - int256(reduction);
         if (sellerAssets != 0) {
             (uint256 supplied,) = IMorpho(morphoBlue).supply(blue.market, sellerAssets, 0, address(this), hex"");
@@ -671,6 +674,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (soldUnits == 0) {
             if (feeDecrease >= a.netMaturityClaim) a.netMaturityClaim = 0;
             else a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) - feeDecrease);
+            // A current-credit impairment is a known loss, not deferred income. Clamp book value
+            // immediately so a later buy cannot recover value that the protocol no longer supports.
+            if (postSaleClaim < a.bookValue) a.bookValue = _toUint128(postSaleClaim);
         }
         a.lastCheckpoint = uint40(block.timestamp < market.maturity ? block.timestamp : market.maturity);
     }

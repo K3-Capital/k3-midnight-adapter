@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Offer} from "midnight/interfaces/IMidnight.sol";
 import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
 import {PolicySetterRatifier} from "../../src/PolicySetterRatifier.sol";
+import {BlueMidnightAdapterAccountingTest} from "../unit/BlueMidnightAdapterAccounting.t.sol";
 
 interface IPolicyEpochMaker {
     function setEpoch(uint64 epoch) external;
@@ -60,5 +61,25 @@ contract OfferPolicyFuzzTest is Test {
             midnight.ratify(ratifier, offer, abi.encode(root, 0, new bytes32[](0))),
             keccak256("morpho.midnight.callbackSuccess")
         );
+    }
+}
+
+contract OfferPolicyAdapterGuardFuzzTest is BlueMidnightAdapterAccountingTest {
+    function testFuzzExactMarketAndEconomicGuards(uint128 maxAssets, uint24 tick) public {
+        maxAssets = uint128(bound(maxAssets, 1, 1_000_000));
+        Offer memory offer = _validBuyOffer(maxAssets);
+        assertTrue(adapter.acceptsOffer(offer));
+
+        Offer memory wrongMarket = offer;
+        wrongMarket.market.midnight = address(0xBEEF);
+        assertFalse(adapter.acceptsOffer(wrongMarket));
+
+        Offer memory wrongLoanToken = offer;
+        wrongLoanToken.market.loanToken = address(0xCAFE);
+        assertFalse(adapter.acceptsOffer(wrongLoanToken));
+
+        Offer memory wrongTick = offer;
+        wrongTick.tick = tick;
+        if (tick > 100) assertFalse(adapter.acceptsOffer(wrongTick));
     }
 }

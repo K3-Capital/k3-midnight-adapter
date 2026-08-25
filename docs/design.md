@@ -32,9 +32,9 @@ The implementation must preserve this invariant:
 - Curator-configurable market, rate, maturity, root lifetime, root notional, exposure, and exit-price limits.
 - Quoter-controlled buy and sell roots, constrained by live onchain policy.
 - Best-effort synchronous Vault V2 withdrawals from raw USDC, Morpho Blue liquidity, repayments, or safe credit sales.
-- Per-market amortized-cost accounting for Midnight positions.
+- Track the adapter-owned Blue shares if needed for donation-safe accounting.
 - Immediate recognition of Midnight losses and realized sale P&L.
-- Bounded active-market loops and explicit gas/liveness limits.
+- Constant-time market accounting and explicit gas/liveness limits.
 - Emergency quoter revocation and epoch-wide root invalidation.
 - Stacked, independently reviewable PRs with unit, fuzz, invariant, integration, and fork tests.
 
@@ -433,9 +433,10 @@ The quoter must not receive Midnight authorization for this flow.
 
 ## 13. Accounting and valuation
 
-### 13.1 Per-market state
+### 13.1 Scalar market state
 
-Recommended conceptual state:
+The adapter has one immutable Midnight market, so the accounting record is scalar
+and is never selected by a caller-supplied market key:
 
 ```solidity
 struct MarketAccounting {
@@ -819,8 +820,8 @@ Deliver:
 
 - Direction-specific offer policy.
 - `onBuy` and `onSell` integrated with Blue.
-- Dynamic global/per-market caps using actual callback fills.
-- Per-market amortized-cost accounting.
+- Callback fills bounded by parent Vault allocation and Blue liquidity.
+- Scalar amortized-cost accounting.
 - Midnight fee/loss synchronization.
 - Root relay functions and policy-epoch invalidation.
 - Unit, fuzz, and accounting transition tests.

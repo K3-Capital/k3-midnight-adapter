@@ -335,7 +335,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
         assertEq(adapter.realAssets(), initialNav - 11);
 
         midnight.takeMakerSell(adapter, midnightId, midnightMarket, 30, 37, 0);
-        MarketAccounting memory afterSale = adapter.marketAccounting(midnightId);
+        MarketAccounting memory afterSale = adapter.accounting();
         assertEq(afterSale.bookValue, 46);
         assertEq(afterSale.netMaturityClaim, 53);
         assertEq(afterSale.trackedCredit, 46);
@@ -346,7 +346,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
         midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 3);
         midnight.takeMakerSell(adapter, midnightId, midnightMarket, 50, 50, 2);
 
-        MarketAccounting memory a = adapter.marketAccounting(midnightId);
+        MarketAccounting memory a = adapter.accounting();
         assertEq(a.trackedCredit, 50);
         assertEq(a.bookValue, 50);
         assertEq(a.netMaturityClaim, 51);
@@ -368,7 +368,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
         uint40 expectedCheckpoint,
         bool expectedActive
     ) internal view {
-        MarketAccounting memory a = adapter.marketAccounting(marketId);
+        MarketAccounting memory a = adapter.accounting();
         assertEq(a.bookValue, expectedBookValue);
         assertEq(a.netMaturityClaim, expectedClaim);
         assertEq(a.trackedCredit, expectedCredit);

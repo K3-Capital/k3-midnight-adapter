@@ -829,6 +829,46 @@
   },
   {
     "inputs": [],
+    "name": "accounting",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint128",
+            "name": "bookValue",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint128",
+            "name": "netMaturityClaim",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint128",
+            "name": "trackedCredit",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint40",
+            "name": "lastCheckpoint",
+            "type": "uint40"
+          },
+          {
+            "internalType": "bool",
+            "name": "active",
+            "type": "bool"
+          }
+        ],
+        "internalType": "struct MarketAccounting",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "adapterId",
     "outputs": [
       {
@@ -1171,52 +1211,6 @@
     "name": "lowerExitLossLimit",
     "outputs": [],
     "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      }
-    ],
-    "name": "marketAccounting",
-    "outputs": [
-      {
-        "components": [
-          {
-            "internalType": "uint128",
-            "name": "bookValue",
-            "type": "uint128"
-          },
-          {
-            "internalType": "uint128",
-            "name": "netMaturityClaim",
-            "type": "uint128"
-          },
-          {
-            "internalType": "uint128",
-            "name": "trackedCredit",
-            "type": "uint128"
-          },
-          {
-            "internalType": "uint40",
-            "name": "lastCheckpoint",
-            "type": "uint40"
-          },
-          {
-            "internalType": "bool",
-            "name": "active",
-            "type": "bool"
-          }
-        ],
-        "internalType": "struct MarketAccounting",
-        "name": "",
-        "type": "tuple"
-      }
-    ],
-    "stateMutability": "view",
     "type": "function"
   },
   {

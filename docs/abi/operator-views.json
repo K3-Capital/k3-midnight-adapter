@@ -4,7 +4,7 @@
     "expectedSupplyAssets",
     "blueAvailableLiquidity",
     "buyerAssetsBound",
-    "marketAccounting",
+    "accounting",
     "pinnedMidnightMarketId",
     "pinnedMidnightMarketHash"
   ]

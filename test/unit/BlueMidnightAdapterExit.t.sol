@@ -275,12 +275,12 @@ contract BlueMidnightAdapterExitTest is Test {
 
         uint256 collected = adapter.collectRepayments(25);
         assertEq(collected, 25);
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 75);
+        assertEq(adapter.accounting().trackedCredit, 75);
 
         token.mint(address(midnight), 75);
         midnight.seed(midnightMarket, 75, 0, 75);
         midnight.take(_offer(), hex"", 75, address(adapter), address(adapter), address(adapter), hex"");
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 0);
+        assertEq(adapter.accounting().trackedCredit, 0);
     }
 
     function testSafeExitSucceedsAfterMarketDisableAndReportsLoss() public {
@@ -298,7 +298,7 @@ contract BlueMidnightAdapterExitTest is Test {
         vm.prank(address(vault));
         adapter.deallocate(data, 80, bytes4(0), address(0));
 
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 0);
+        assertEq(adapter.accounting().trackedCredit, 0);
         assertEq(token.balanceOf(address(adapter)), 80);
     }
 
@@ -315,7 +315,7 @@ contract BlueMidnightAdapterExitTest is Test {
         vm.prank(address(vault));
         adapter.deallocate(data, 80, bytes4(0), address(0));
 
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 100);
+        assertEq(adapter.accounting().trackedCredit, 100);
         assertEq(token.balanceOf(address(adapter)), 0);
     }
 

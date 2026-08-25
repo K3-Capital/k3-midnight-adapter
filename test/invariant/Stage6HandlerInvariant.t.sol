@@ -68,7 +68,7 @@ contract Stage6AdapterHandler is Test {
     }
 
     function repay(uint256 requested) external {
-        uint256 credit = adapter.marketAccounting(adapter.pinnedMidnightMarketHash()).trackedCredit;
+        uint256 credit = adapter.accounting().trackedCredit;
         if (credit == 0) return;
         uint256 units = requested % (credit + 1);
         if (units == 0) return;
@@ -78,7 +78,7 @@ contract Stage6AdapterHandler is Test {
     }
 
     function sell(uint256 requested) external {
-        uint256 credit = adapter.marketAccounting(adapter.pinnedMidnightMarketHash()).trackedCredit;
+        uint256 credit = adapter.accounting().trackedCredit;
         if (credit == 0) return;
         uint256 units = requested % (credit + 1);
         if (units == 0) return;

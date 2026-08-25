@@ -64,7 +64,7 @@ There is no curator, quoter, or operator rescue path for primary assets.
 Before release, the implementation reviewer should independently verify
 constructor immutables, every external call and callback ordering, accounting
 bounds and rounding, timelock selector binding, root epoch invalidation,
-receiver pinning, exact-or-revert exits, active-market loop bounds, all
+receiver pinning, exact-or-revert exits, constant-time market accounting, all
 invariant handlers, and deterministic ABI artifacts. Record implementation
 findings and their remediation commit in the release change record. Separately,
 obtain the formal independent external audit and record its findings,

@@ -24,7 +24,7 @@ import {RiskIdLib} from "./libraries/RiskIdLib.sol";
 
 /// @title Blue Midnight adapter core
 /// @notice The Stage 3, single-market productive sleeve for a Vault V2 adapter.
-/// @dev Midnight callbacks and position accounting are deliberately added in Stage 4.
+/// @dev Midnight callbacks and scalar conservative position accounting.
 contract BlueMidnightAdapter is IBlueMidnightAdapter {
     using MarketParamsLib for MarketParams;
     using SharesMathLib for uint256;
@@ -95,7 +95,8 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     MidnightMarket internal pinnedMidnightMarket;
     bytes32 public immutable pinnedMidnightMarketId;
     bytes32 public immutable pinnedMidnightMarketHash;
-    MarketAccounting internal accounting;
+    // Exactly one immutable Midnight market is configured, so accounting is scalar.
+    MarketAccounting internal accountingState;
     bool public marketEnabled;
     MarketEconomicPolicy public marketEconomicPolicy;
     uint256 public maxExitLossAssets;
@@ -445,9 +446,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         return bound;
     }
 
-    function marketAccounting(bytes32 marketId) external view returns (MarketAccounting memory) {
-        if (marketId != pinnedMidnightMarketHash) revert InvalidMarket();
-        return accounting;
+    /// @notice Return the scalar accounting record for the immutable market.
+    function accounting() external view returns (MarketAccounting memory) {
+        return accountingState;
     }
 
     function acceptsOffer(Offer calldata offer) external view returns (bool) {
@@ -494,7 +495,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         }
         return offer.maxAssets == 0 && offer.maxUnits > 0 && offer.tick >= policy.minSellTick
             && offer.receiverIfMakerIsSeller == address(this) && offer.reduceOnly && offer.callbackData.length == 0
-            && offer.maxUnits <= accounting.trackedCredit;
+            && offer.maxUnits <= accountingState.trackedCredit;
     }
 
     function _validateEconomicPolicy(MarketEconomicPolicy calldata policy) internal pure {
@@ -536,7 +537,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             SafeERC20Lib.safeApprove(asset, midnight, 0);
             SafeERC20Lib.safeApprove(asset, midnight, buyerAssets);
         }
-        MarketAccounting storage a = accounting;
+        MarketAccounting storage a = accountingState;
         a.bookValue = _toUint128(uint256(a.bookValue) + buyerAssets);
         a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) + buyerAssets + pendingFeeIncrease);
         a.trackedCredit = _toUint128(uint256(a.trackedCredit) + units);
@@ -567,7 +568,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         }
         if (data.length != 0 || units == 0) revert InvalidCallback();
         uint256 postSaleClaim = _checkpoint(marketId, market, pendingFeeDecrease, units);
-        MarketAccounting storage a = accounting;
+        MarketAccounting storage a = accountingState;
         if (units > a.trackedCredit || a.trackedCredit == 0) revert InsufficientCredit();
         uint256 oldBook = a.bookValue;
         uint256 reduction = oldBook * units / a.trackedCredit;
@@ -608,7 +609,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
                     || offer.tick < minExitBuyTick || offer.market.midnight != midnight
                     || offer.market.loanToken != asset || offer.market.chainId != block.chainid
                     || offer.start > block.timestamp || offer.expiry < block.timestamp || !marketKnown(id)
-                    || exit.units == 0 || exit.units > accounting.trackedCredit
+                    || exit.units == 0 || exit.units > accountingState.trackedCredit
             ) revert ExitOfferInvalid();
             // For a maker-buy offer the taker is the seller. The only receiver
             // accepted by this adapter is itself; the callback is also fixed
@@ -626,12 +627,12 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     }
 
     function marketKnown(bytes32 marketId) public view returns (bool) {
-        return marketId == pinnedMidnightMarketHash && (marketEnabled || accounting.trackedCredit != 0);
+        return marketId == pinnedMidnightMarketHash && (marketEnabled || accountingState.trackedCredit != 0);
     }
 
     function _reduceCreditAfterRecovery(bytes32 id, uint256 units) internal {
         if (id != pinnedMidnightMarketHash) revert InvalidMarket();
-        MarketAccounting storage a = accounting;
+        MarketAccounting storage a = accountingState;
         if (units > a.trackedCredit || a.trackedCredit == 0) revert InsufficientCredit();
         uint256 oldCredit = a.trackedCredit;
         a.bookValue = _toUint128(uint256(a.bookValue) * (oldCredit - units) / oldCredit);
@@ -647,7 +648,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         internal
         returns (uint256 postSaleClaim)
     {
-        MarketAccounting storage a = accounting;
+        MarketAccounting storage a = accountingState;
         if (a.active && a.trackedCredit != 0) {
             (uint128 credit, uint128 pendingFee,) =
                 IMidnight(midnight).updatePositionView(market, IdLib.toId(market), address(this));
@@ -675,7 +676,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     }
 
     function _conservativeBookValue() internal view returns (uint256) {
-        MarketAccounting memory a = accounting;
+        MarketAccounting memory a = accountingState;
         if (!a.active || a.trackedCredit == 0) return a.bookValue;
         MidnightMarket memory market = pinnedMidnightMarket;
         (uint128 credit, uint128 pendingFee,) =

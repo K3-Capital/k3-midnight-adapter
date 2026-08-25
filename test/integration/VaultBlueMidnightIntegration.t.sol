@@ -270,7 +270,7 @@ contract VaultBlueMidnightIntegrationTest is Test {
         bytes memory buyData = _approveOffer(buy);
         vm.prank(borrower);
         midnight.take(buy, buyData, UNITS, borrower, borrower, address(0), hex"");
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, UNITS);
+        assertEq(adapter.accounting().trackedCredit, UNITS);
         assertEq(adapter.realAssets(), ASSETS);
         assertEq(token.balanceOf(borrower), UNITS);
 
@@ -279,11 +279,11 @@ contract VaultBlueMidnightIntegrationTest is Test {
         vm.prank(borrower);
         midnight.repay(midnightMarket, PARTIAL_UNITS, borrower, address(0), hex"");
         adapter.collectRepayments(PARTIAL_UNITS);
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, UNITS - PARTIAL_UNITS);
+        assertEq(adapter.accounting().trackedCredit, UNITS - PARTIAL_UNITS);
 
         _adapterCall(abi.encodeCall(adapter.setQuoter, (address(this), false)));
         _adapterCall(abi.encodeCall(adapter.setQuoter, (address(this), true)));
-        uint256 remainingUnits = adapter.marketAccounting(midnightMarketId).trackedCredit;
+        uint256 remainingUnits = adapter.accounting().trackedCredit;
         Offer memory sell = _sellOffer(remainingUnits);
         bytes memory sellData = _approveOffer(sell);
         token.mint(lender, UNITS);
@@ -291,7 +291,7 @@ contract VaultBlueMidnightIntegrationTest is Test {
         token.approve(address(midnight), type(uint256).max);
         vm.prank(lender);
         midnight.take(sell, sellData, remainingUnits, lender, address(0), address(0), hex"");
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 0);
+        assertEq(adapter.accounting().trackedCredit, 0);
 
         vm.prank(borrower);
         midnight.repay(midnightMarket, remainingUnits, borrower, address(0), hex"");

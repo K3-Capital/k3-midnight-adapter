@@ -23,7 +23,7 @@ The checked artifacts cover `BlueMidnightAdapter`,
 `BlueMidnightAdapterFactory`, and `PolicySetterRatifier`, including their
 events/errors. `docs/abi/operator-views.json` records the required operator
 views: `realAssets`, `expectedSupplyAssets`, `blueAvailableLiquidity`,
-`buyerAssetsBound`, `marketAccounting`, `pinnedMidnightMarketId`, and
+`buyerAssetsBound`, `accounting`, `pinnedMidnightMarketId`, and
 `pinnedMidnightMarketHash`. The script rebuilds production sources with tests skipped,
 sorts ABI entries and keys, and fails on drift or a missing operator view.
 
@@ -108,7 +108,7 @@ Alert on:
 - roots that are close to expiry or invalidated by an epoch change.
 
 Operator views include `realAssets`, `expectedSupplyAssets`,
-`blueAvailableLiquidity`, `buyerAssetsBound`, `marketAccounting`,
+`blueAvailableLiquidity`, `buyerAssetsBound`, `accounting`,
 `pinnedMidnightMarketId`, and `pinnedMidnightMarketHash`.
 
 ## Risk-off and rollback

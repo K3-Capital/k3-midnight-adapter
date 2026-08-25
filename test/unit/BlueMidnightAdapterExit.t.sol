@@ -275,8 +275,16 @@ contract BlueMidnightAdapterExitTest is Test {
         midnight.seed(midnightMarket, 75, 0, 75);
         Offer memory offer = _sellOffer(75);
         assertTrue(adapter.acceptsOffer(offer));
-        uint256 sellerAssets = adapter.executeMakerSell(offer, hex"", 75);
-        assertEq(sellerAssets, 75);
+        midnight.take(offer, hex"", 75, address(0xCAFE), address(adapter), address(adapter), hex"");
+        assertEq(adapter.accounting().trackedCredit, 0);
+    }
+
+    function testCollectAllSynchronizesImpairedCreditBeforeCappingUnits() public {
+        _seedCredit(100);
+        token.mint(address(midnight), 50);
+        midnight.seed(midnightMarket, 50, 100, 0);
+
+        assertEq(adapter.collectRepayment(0), 50);
         assertEq(adapter.accounting().trackedCredit, 0);
     }
 

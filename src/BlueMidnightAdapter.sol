@@ -324,13 +324,13 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     /// @dev This path is intentionally available while risk-off is active.
     function collectRepayment(uint256 requestedUnits) external returns (uint256 totalAssets) {
         if (!marketKnown(pinnedMidnightMarketHash)) revert InvalidMarket();
+        _checkpoint(pinnedMidnightMarketHash, pinnedMidnightMarket, 0, 0);
         uint256 units = requestedUnits;
         uint256 available = IMidnight(midnight).withdrawable(pinnedMidnightMarketId);
         uint256 credit = accountingState.trackedCredit;
         if (available > credit) available = credit;
         if (units == 0 || units > available) units = available;
         if (units == 0) revert RepaymentUnavailable();
-        _checkpoint(pinnedMidnightMarketHash, pinnedMidnightMarket, 0, 0);
         uint256 beforeBalance = IERC20(asset).balanceOf(address(this));
         IMidnight(midnight).withdraw(pinnedMidnightMarket, units, address(this), address(this));
         uint256 received = IERC20(asset).balanceOf(address(this)) - beforeBalance;
@@ -341,17 +341,6 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         totalAssets += received;
         emit RepaymentCollected(pinnedMidnightMarketHash, units, received);
         totalAssets = received;
-    }
-
-    /// @notice Permissionless, policy-validated reduce-only maker sell.
-    function executeMakerSell(Offer calldata offer, bytes calldata ratifierData, uint256 units)
-        external
-        returns (uint256 sellerAssets)
-    {
-        if (offer.maker != address(this) || offer.buy || !acceptsOffer(offer)) revert InvalidOffer();
-        if (units == 0 || units > offer.maxUnits) revert InvalidOffer();
-        (, sellerAssets) =
-            IMidnight(midnight).take(offer, ratifierData, units, msg.sender, address(this), address(this), hex"");
     }
 
     function realAssets() external view returns (uint256) {

@@ -64,6 +64,7 @@ contract Stage6AdapterHandler is Test {
         uint256 available = adapter.expectedSupplyAssets();
         uint256 assets = available == 0 ? 0 : requested % (available + 1);
         if (assets == 0) return;
+        if (assets > adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash())) return;
         midnight.invokeBuy(address(adapter), midnightMarket, assets, assets);
     }
 

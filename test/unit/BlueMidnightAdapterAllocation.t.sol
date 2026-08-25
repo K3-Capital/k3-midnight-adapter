@@ -5,6 +5,8 @@ import {Test} from "forge-std/Test.sol";
 import {BlueMidnightAdapter} from "../../src/BlueMidnightAdapter.sol";
 import {MarketParams, Id} from "morpho-blue/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "morpho-blue/libraries/MarketParamsLib.sol";
+import {Market, CollateralParams} from "midnight/interfaces/IMidnight.sol";
+import {MarketEconomicPolicy} from "../../src/types/AdapterTypes.sol";
 
 contract AllocationToken {
     mapping(address => uint256) public balanceOf;
@@ -36,6 +38,7 @@ contract AllocationToken {
 contract AllocationVault {
     address public immutable token;
     address public curator;
+    mapping(bytes32 => uint256) public allocations;
 
     constructor(address _token) {
         token = _token;
@@ -48,6 +51,14 @@ contract AllocationVault {
 
     function isSentinel(address) external pure returns (bool) {
         return false;
+    }
+
+    function allocation(bytes32 id) external view returns (uint256) {
+        return allocations[id];
+    }
+
+    function setAllocation(bytes32 id, uint256 amount) external {
+        allocations[id] = amount;
     }
 }
 
@@ -100,6 +111,10 @@ contract AllocationMorpho {
         markets[Id.unwrap(id)][1] = supplyShares;
         markets[Id.unwrap(id)][2] = borrowAssets;
     }
+
+    function setShares(Id id, uint256 amount) external {
+        shares[Id.unwrap(id)] = amount;
+    }
 }
 
 contract BlueMidnightAdapterAllocationTest is Test {
@@ -114,15 +129,28 @@ contract BlueMidnightAdapterAllocationTest is Test {
         token = new AllocationToken();
         vault = new AllocationVault(address(token));
         morpho = new AllocationMorpho(address(token));
-        adapter = new BlueMidnightAdapter(address(vault), address(4), address(morpho), address(5));
         market.loanToken = address(token);
+        MarketEconomicPolicy memory policy = MarketEconomicPolicy(1_000, 0, 30 days, 20 days, 0, 0, true);
+        adapter = new BlueMidnightAdapter(
+            address(vault), market, address(4), address(morpho), address(5), _pinnedMarket(), policy, address(this)
+        );
+    }
+
+    function _pinnedMarket() internal view returns (Market memory) {
+        return Market({
+            chainId: block.chainid,
+            midnight: address(4),
+            loanToken: address(token),
+            collateralParams: new CollateralParams[](0),
+            maturity: block.timestamp + 30 days,
+            rcfThreshold: 0,
+            enterGate: address(0),
+            liquidatorGate: address(0)
+        });
     }
 
     function _configure() internal {
-        bytes memory data = abi.encodeWithSelector(adapter.setBlueMarket.selector, market);
-        adapter.submit(data);
-        vm.warp(adapter.executableAt(data));
-        adapter.setBlueMarket(market);
+        // Configuration is pinned in the constructor.
     }
 
     function testConstructorStartsNonzeroEpochAndBindsAsset() public view {
@@ -138,9 +166,11 @@ contract BlueMidnightAdapterAllocationTest is Test {
     }
 
     function testAllocationRejectsUnconfiguredMarket() public {
+        MarketParams memory invalid = market;
+        invalid.oracle = address(9);
         vm.expectRevert(BlueMidnightAdapter.InvalidMarket.selector);
         vm.prank(address(vault));
-        adapter.allocate(abi.encode(market), 1, bytes4(0), address(0));
+        adapter.allocate(abi.encode(invalid), 1, bytes4(0), address(0));
     }
 
     function testAllocationAndDeallocationReturnAssetsThroughAdapter() public {
@@ -160,7 +190,7 @@ contract BlueMidnightAdapterAllocationTest is Test {
         assertEq(token.balanceOf(address(vault)), 100);
     }
 
-    function testBuyerBoundUsesBorrowLiquidityAndCaps() public {
+    function testBuyerBoundUsesBorrowLiquidity() public {
         _configure();
         token.mint(address(vault), 1_000_000);
         vm.prank(address(vault));
@@ -169,13 +199,26 @@ contract BlueMidnightAdapterAllocationTest is Test {
         adapter.allocate(abi.encode(market), 1_000_000, bytes4(0), address(0));
         morpho.setMarket(market.id(), 1_000_000, 1_000_000, 900_000);
 
-        bytes memory capData = abi.encodeWithSelector(adapter.setExposureCaps.selector, 1_000_000, 1_000_000);
-        adapter.submit(capData);
-        vm.warp(adapter.executableAt(capData));
-        adapter.setExposureCaps(1_000_000, 1_000_000);
         assertEq(adapter.blueAvailableLiquidity(), 100_000);
         assertEq(adapter.expectedSupplyAssets(), 500_000);
         assertFalse(adapter.riskOffActive());
-        assertEq(adapter.buyerAssetsBound(bytes32(0)), 100_000);
+        assertEq(adapter.blueAvailableLiquidity(), 100_000);
+    }
+
+    function testBuyerBoundUsesOnlyVaultAllocationAndBlueLiquidity() public {
+        _configure();
+        token.mint(address(vault), 1_000);
+        vm.prank(address(vault));
+        token.transfer(address(adapter), 1_000);
+        vm.prank(address(vault));
+        adapter.allocate(abi.encode(market), 1_000, bytes4(0), address(0));
+        morpho.setShares(market.id(), 4_000_000);
+        morpho.setMarket(market.id(), 1_000, 4_000_000, 200);
+        vault.setAllocation(adapter.adapterId(), 700);
+
+        assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 700);
+
+        morpho.setMarket(market.id(), 1_000, 2_000_000, 800);
+        assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 200);
     }
 }

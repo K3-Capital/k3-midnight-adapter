@@ -4,6 +4,8 @@ pragma solidity 0.8.34;
 import {Test} from "forge-std/Test.sol";
 import {BlueMidnightAdapter} from "../../src/BlueMidnightAdapter.sol";
 import {MarketParams} from "morpho-blue/interfaces/IMorpho.sol";
+import {AdapterTestMarket} from "../utils/AdapterTestMarket.sol";
+import {MarketEconomicPolicy} from "../../src/types/AdapterTypes.sol";
 import {ExitToken, ExitVault, ExitMorpho} from "../unit/BlueMidnightAdapterExit.t.sol";
 
 contract SolvencyInvariantTest is Test {
@@ -17,12 +19,17 @@ contract SolvencyInvariantTest is Test {
         token = new ExitToken();
         vault = new ExitVault(address(token));
         morpho = new ExitMorpho(address(token));
-        adapter = new BlueMidnightAdapter(address(vault), address(4), address(morpho), address(5));
         market = MarketParams(address(token), address(1), address(2), address(3), 0);
-        bytes memory data = abi.encodeWithSelector(adapter.setBlueMarket.selector, market);
-        adapter.submit(data);
-        vm.warp(adapter.executableAt(data));
-        adapter.setBlueMarket(market);
+        adapter = new BlueMidnightAdapter(
+            address(vault),
+            market,
+            address(4),
+            address(morpho),
+            address(5),
+            AdapterTestMarket.make(address(4), address(token)),
+            MarketEconomicPolicy(1_000, 0, 30 days, 20 days, 0, 0, true),
+            address(this)
+        );
     }
 
     function testSolvencyInvariantNoPhantomAssetsAfterAllocation() public {

@@ -3,7 +3,6 @@ pragma solidity 0.8.34;
 
 import {Test} from "forge-std/Test.sol";
 
-import {BlueMidnightAdapterFactory} from "../../src/BlueMidnightAdapterFactory.sol";
 import {BlueMidnightAdapter} from "../../src/BlueMidnightAdapter.sol";
 import {PolicySetterRatifier} from "../../src/PolicySetterRatifier.sol";
 import {MarketEconomicPolicy} from "../../src/types/AdapterTypes.sol";
@@ -72,7 +71,6 @@ contract VaultBlueMidnightIntegrationTest is Test {
     uint256 internal constant UNITS = 100_000 ether;
     uint256 internal constant PARTIAL_UNITS = 40_000 ether;
 
-    BlueMidnightAdapterFactory internal factory;
     IntegrationToken internal token;
     IntegrationToken internal collateral;
     IVaultV2 internal vault;
@@ -133,16 +131,29 @@ contract VaultBlueMidnightIntegrationTest is Test {
         midnightProtocolId = midnight.touchMarket(midnightMarket);
         midnightMarketId = HashLib.hashMarket(midnightMarket);
 
-        factory = new BlueMidnightAdapterFactory();
-        adapter = BlueMidnightAdapter(
-            factory.deploy(
-                keccak256("full-lifecycle"), address(vault), address(midnight), address(morpho), address(ratifier)
-            )
+        MarketEconomicPolicy memory policy = MarketEconomicPolicy({
+            maxBuyTick: uint24(MAX_TICK),
+            minSellTick: uint24(MAX_TICK),
+            maxTenor: uint40(30 days),
+            maxExpiryHorizon: uint40(30 days),
+            maxContinuousFeePerSecondWad: 0,
+            maxSettlementFeeWad: uint64(MAX_SETTLEMENT_FEE_360_DAYS),
+            configured: true
+        });
+        adapter = new BlueMidnightAdapter(
+            address(vault),
+            blueMarket,
+            address(midnight),
+            address(morpho),
+            address(ratifier),
+            midnightMarket,
+            policy,
+            address(this)
         );
         vm.prank(address(adapter));
         midnight.setIsAuthorized(address(ratifier), true, address(adapter));
 
-        _configureAdapter();
+        adapter.approveRoot(bytes32(uint256(1))); // prove quoter wiring before real roots.
         _configureVault();
 
         token.mint(depositor, ASSETS);
@@ -156,51 +167,25 @@ contract VaultBlueMidnightIntegrationTest is Test {
         midnight.supplyCollateral(midnightMarket, 0, 2_000_000 ether, borrower);
     }
 
-    function _configureAdapter() internal {
-        _adapterCall(abi.encodeCall(adapter.setBlueMarket, (blueMarket)));
-        _adapterCall(abi.encodeCall(adapter.setQuoter, (address(this), true)));
-        _adapterCall(abi.encodeCall(adapter.setExposureCaps, (ASSETS, ASSETS)));
-        MarketEconomicPolicy memory policy = MarketEconomicPolicy({
-            maxBuyTick: uint24(MAX_TICK),
-            minSellTick: uint24(MAX_TICK),
-            maxTenor: uint40(30 days),
-            maxExpiryHorizon: uint40(30 days),
-            maxContinuousFeePerSecondWad: 0,
-            maxSettlementFeeWad: uint64(MAX_SETTLEMENT_FEE_360_DAYS),
-            configured: true
-        });
-        _adapterCall(abi.encodeCall(adapter.setMarketEconomicPolicy, (midnightMarketId, policy)));
-        _adapterCall(abi.encodeCall(adapter.setMarketPolicy, (midnightMarketId, ASSETS, ASSETS, true)));
-        adapter.approveRoot(bytes32(uint256(1))); // prove quoter wiring before real roots.
-    }
-
     function _configureVault() internal {
         _vaultCall(abi.encodeCall(vault.addAdapter, (address(adapter))));
         _vaultCall(abi.encodeCall(vault.setIsAllocator, (allocator, true)));
         bytes32 adapterId = keccak256(abi.encode("this", address(adapter)));
         bytes32 blueId = keccak256(abi.encode("morpho-blue", blueMarket.id()));
         bytes32 midnightId = keccak256(abi.encode("midnight", address(midnight)));
+        bytes32 midnightMarketRiskId = keccak256(abi.encode("midnight-market", midnightMarketId));
         _vaultCall(abi.encodeCall(vault.increaseAbsoluteCap, (abi.encode("this", address(adapter)), ASSETS)));
         _vaultCall(abi.encodeCall(vault.increaseRelativeCap, (abi.encode("this", address(adapter)), 1e18)));
         _vaultCall(abi.encodeCall(vault.increaseAbsoluteCap, (abi.encode("morpho-blue", blueMarket.id()), ASSETS)));
         _vaultCall(abi.encodeCall(vault.increaseRelativeCap, (abi.encode("morpho-blue", blueMarket.id()), 1e18)));
         _vaultCall(abi.encodeCall(vault.increaseAbsoluteCap, (abi.encode("midnight", address(midnight)), ASSETS)));
         _vaultCall(abi.encodeCall(vault.increaseRelativeCap, (abi.encode("midnight", address(midnight)), 1e18)));
+        _vaultCall(abi.encodeCall(vault.increaseAbsoluteCap, (abi.encode("midnight-market", midnightMarketId), ASSETS)));
+        _vaultCall(abi.encodeCall(vault.increaseRelativeCap, (abi.encode("midnight-market", midnightMarketId), 1e18)));
         assertEq(adapterId, keccak256(abi.encode("this", address(adapter))));
         assertEq(blueId, keccak256(abi.encode("morpho-blue", blueMarket.id())));
         assertEq(midnightId, keccak256(abi.encode("midnight", address(midnight))));
-    }
-
-    function _adapterCall(bytes memory data) internal {
-        adapter.submit(data);
-        vm.warp(adapter.executableAt(data));
-        (bool ok, bytes memory returndata) = address(adapter).call(data);
-
-        if (!ok) {
-            assembly ("memory-safe") {
-                revert(add(returndata, 32), mload(returndata))
-            }
-        }
+        assertEq(midnightMarketRiskId, keccak256(abi.encode("midnight-market", midnightMarketId)));
     }
 
     function _vaultCall(bytes memory data) internal {
@@ -262,37 +247,16 @@ contract VaultBlueMidnightIntegrationTest is Test {
         bytes memory buyData = _approveOffer(buy);
         vm.prank(borrower);
         midnight.take(buy, buyData, UNITS, borrower, borrower, address(0), hex"");
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, UNITS);
+        assertEq(adapter.accounting().trackedCredit, UNITS);
         assertEq(adapter.realAssets(), ASSETS);
         assertEq(token.balanceOf(borrower), UNITS);
 
         vm.prank(borrower);
         token.approve(address(midnight), type(uint256).max);
         vm.prank(borrower);
-        midnight.repay(midnightMarket, PARTIAL_UNITS, borrower, address(0), hex"");
-        Market[] memory markets = new Market[](1);
-        markets[0] = midnightMarket;
-        uint256[] memory units = new uint256[](1);
-        units[0] = PARTIAL_UNITS;
-        adapter.collectRepayments(markets, units);
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, UNITS - PARTIAL_UNITS);
-
-        _adapterCall(abi.encodeCall(adapter.setQuoter, (address(this), false)));
-        _adapterCall(abi.encodeCall(adapter.setQuoter, (address(this), true)));
-        uint256 remainingUnits = adapter.marketAccounting(midnightMarketId).trackedCredit;
-        Offer memory sell = _sellOffer(remainingUnits);
-        bytes memory sellData = _approveOffer(sell);
-        token.mint(lender, UNITS);
-        vm.prank(lender);
-        token.approve(address(midnight), type(uint256).max);
-        vm.prank(lender);
-        midnight.take(sell, sellData, remainingUnits, lender, address(0), address(0), hex"");
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 0);
-
-        vm.prank(borrower);
-        midnight.repay(midnightMarket, remainingUnits, borrower, address(0), hex"");
-        vm.prank(lender);
-        midnight.withdraw(midnightMarket, remainingUnits, lender, lender);
+        midnight.repay(midnightMarket, UNITS, borrower, address(0), hex"");
+        adapter.collectRepayment(UNITS);
+        assertEq(adapter.accounting().trackedCredit, 0);
         assertEq(midnight.withdrawable(midnightProtocolId), 0);
 
         uint256 before = token.balanceOf(depositor);
@@ -306,10 +270,68 @@ contract VaultBlueMidnightIntegrationTest is Test {
         assertEq(adapter.realAssets(), 0);
     }
 
-    function testFactoryPredictionMatchesRealDeployment() public view {
-        address predicted = factory.predict(
-            keccak256("prediction"), address(vault), address(midnight), address(morpho), address(ratifier)
-        );
-        assertTrue(predicted != address(0));
+    function testVaultDepositWithdrawShareFairnessAroundFillAndRealization() public {
+        vm.prank(depositor);
+        uint256 shares = vault.deposit(ASSETS, depositor);
+        vm.prank(allocator);
+        vault.allocate(address(adapter), abi.encode(blueMarket), ASSETS);
+        uint256 priceBeforeFill = vault.convertToAssets(shares);
+        assertEq(priceBeforeFill, ASSETS);
+
+        Offer memory buy = _buyOffer();
+        bytes memory buyData = _approveOffer(buy);
+        vm.prank(borrower);
+        midnight.take(buy, buyData, UNITS, borrower, borrower, address(0), hex"");
+        assertEq(vault.convertToAssets(shares), priceBeforeFill);
+
+        vm.prank(borrower);
+        token.approve(address(midnight), type(uint256).max);
+        vm.prank(borrower);
+        midnight.repay(midnightMarket, UNITS, borrower, address(0), hex"");
+        adapter.collectRepayment(UNITS);
+        assertEq(vault.convertToAssets(shares), priceBeforeFill);
+
+        vm.prank(allocator);
+        vault.deallocate(address(adapter), abi.encode(blueMarket), ASSETS);
+        vm.prank(depositor);
+        uint256 withdrawn = vault.redeem(shares, depositor, depositor);
+        assertEq(withdrawn, ASSETS);
+        assertEq(vault.totalSupply(), 0);
+    }
+
+    function testRevokedQuoterRecoveryUsesRealRatifierAndMidnight() public {
+        vm.prank(depositor);
+        vault.deposit(ASSETS, depositor);
+        vm.prank(allocator);
+        vault.allocate(address(adapter), abi.encode(blueMarket), ASSETS);
+
+        Offer memory buy = _buyOffer();
+        bytes memory buyData = _approveOffer(buy);
+        vm.prank(borrower);
+        midnight.take(buy, buyData, UNITS, borrower, borrower, address(0), hex"");
+        assertEq(adapter.accounting().trackedCredit, UNITS);
+
+        _vaultCall(abi.encodeCall(vault.setIsSentinel, (address(this), true)));
+        adapter.revokeQuoter(address(this));
+        assertTrue(adapter.riskOffActive());
+
+        Offer memory sell = _sellOffer(UNITS);
+        bytes32 root = HashLib.hashOffer(sell);
+        adapter.approveRecoveryRoot(root);
+        bytes memory recoveryData = abi.encode(root, uint256(0), new bytes32[](0));
+
+        token.mint(lender, UNITS);
+        vm.prank(lender);
+        token.approve(address(midnight), type(uint256).max);
+        vm.prank(lender);
+        midnight.take(sell, recoveryData, UNITS, lender, address(0), address(0), hex"");
+        assertEq(adapter.accounting().trackedCredit, 0);
+    }
+
+    function testOtherwiseIdenticalOtherMarketIsRejected() public view {
+        Offer memory offer = _buyOffer();
+        offer.market.maturity += 1;
+        assertFalse(adapter.acceptsOffer(offer));
+        assertTrue(HashLib.hashMarket(offer.market) != adapter.pinnedMidnightMarketHash());
     }
 }

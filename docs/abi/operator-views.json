@@ -3,9 +3,10 @@
     "realAssets",
     "expectedSupplyAssets",
     "blueAvailableLiquidity",
+    "immediateLiquidity",
     "buyerAssetsBound",
-    "marketAccounting",
-    "activeMarketIdsLength",
-    "activeMarketIdAt"
+    "accounting",
+    "pinnedMidnightMarketId",
+    "pinnedMidnightMarketHash"
   ]
 }

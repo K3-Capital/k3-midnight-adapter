@@ -8,11 +8,14 @@ deallocate. Morpho Blue and Midnight are external protocols whose pinned
 interfaces and callback ordering are assumptions that must be checked again
 when dependencies change.
 
-The curator controls policy expansion only through selector-specific timelocks.
-The sentinel can reduce risk immediately but cannot expand it. The quoter may
-only approve or revoke roots through the adapter; it is not authorized in
-Midnight or Morpho Blue and cannot select a receiver, callback, market, or
-arbitrary external call.
+The constructor pins the Blue market, Midnight market, economic policy, ratifier,
+and quoter. There is no generic governance-dispatch or custom deployment surface.
+Configuration expansion requires deploying a replacement adapter and
+registering/capping it through Vault V2 governance. The sentinel can reduce risk
+immediately but cannot expand it. The quoter may only approve roots through the
+adapter; revocation is sentinel-controlled. It is not authorized in Midnight or
+Morpho Blue and cannot select a receiver, callback, market, or arbitrary external
+call.
 
 ## Assets and allowed flows
 
@@ -31,24 +34,28 @@ There is no curator, quoter, or operator rescue path for primary assets.
 | Threat | Control and evidence |
 | --- | --- |
 | Compromised quoter drains pooled assets | Quoter has root-management only; adapter validates maker, callback, receiver, market, epoch, and economics. |
-| Malicious sell order redirects proceeds | `receiverIfMakerIsSeller == adapter`, `reduceOnly`, minimum exit tick, and callback caller checks. |
+| Malicious sell order redirects proceeds | `receiverIfMakerIsSeller == adapter`, `reduceOnly`, policy tick, and callback caller checks. |
 | Stale root after policy change | Root approvals are bound to non-zero `policyEpoch`; every accepted change increments the epoch. |
-| Curator instant risk expansion | Expansion selectors use exact calldata timelocks; sentinel can revoke pending data. |
-| Sentinel expands risk | Sentinel entry points only lower caps, tighten policy, disable markets, revoke quoters, or activate risk-off. |
+| Curator instant risk expansion | No adapter expansion setter exists; replacement configuration goes through a new adapter and Vault V2 governance. |
+| Sentinel expands risk | Sentinel entry points only tighten policy, disable the pinned market, revoke quoters, or activate risk-off. The parent Vault adapter cap is the sole concentration boundary. |
 | Arbitrary Blue routing | Adapter stores one market and rejects callback routing data that is not empty. |
-| NAV double count during Blue/Midnight transitions | NAV is adapter cash plus expected Blue supply assets plus bounded conservative market book value; transition tests cover allocation, callbacks, repayment, and exits. |
+| NAV double count during Blue/Midnight transitions | Immediate liquidity is adapter cash plus currently withdrawable Blue assets; open Midnight face value is excluded until repayment or an asynchronous sell. |
 | Known protocol loss hidden in NAV | Callback and checkpoint synchronization reduces tracked claims/book value when Midnight or Blue state loses value. |
-| Illiquid withdrawal silently underpays | Normal withdrawal and safe-exit fallback require the exact requested asset amount or revert. |
-| Unbounded gas denial | Active Midnight markets are indexed with O(1) membership and bounded by `maxActiveMarkets`; callers supply bounded repayment/exit arrays. |
+| Illiquid withdrawal silently underpays | Deallocation uses adapter cash first, withdraws only the shortfall from configured Blue, and reverts atomically if exact liquidity is unavailable. |
+| Synchronous exit reaches Midnight or arbitrary receiver | Deallocation decodes only the configured Blue market. Maker sells are separate, policy-validated operations with proceeds pinned to the adapter. |
 | Reentrancy during external protocol calls | State and caps are checked before transfers; callback entry points require Midnight; no generic external-call primitive exists. |
 | Allowance theft | Allowances are exact-reset for Midnight settlement; quoter is never a spender of adapter assets. |
 
 ## Residual risks
 
-- Synchronous withdrawals are best effort and can revert during a Blue liquidity
-  run; v1 does not promise 100% instant redemption.
+- Withdrawals are best effort and can revert during a Blue liquidity run; v1
+  does not promise 100% instant redemption. Operators recover liquidity through
+  repayment or a policy-valid asynchronous maker sell.
 - Midnight and Morpho Blue correctness, oracle/economic behavior, and availability
   remain external dependencies.
+- Quoter revocation and risk-off invalidate the current root epoch and latch buys
+  off. A Vault sentinel may approve a recovery root only for the already pinned
+  adapter; the offer predicate still requires reduce-only maker-sell recovery.
 - The local integration suite is deterministic and does not replace a fork or
   independent audit.
 - Mainnet deployment is explicitly blocked until a formal independent external
@@ -62,9 +69,9 @@ There is no curator, quoter, or operator rescue path for primary assets.
 ## Review checklist
 
 Before release, the implementation reviewer should independently verify
-constructor immutables, every external call and callback ordering, accounting
-bounds and rounding, timelock selector binding, root epoch invalidation,
-receiver pinning, exact-or-revert exits, active-market loop bounds, all
+constructor immutables (including full market and policy structs), every external call and callback ordering, accounting
+bounds and rounding, replacement deployment verification, root epoch invalidation,
+receiver pinning, exact-or-revert exits, constant-time market accounting, all
 invariant handlers, and deterministic ABI artifacts. Record implementation
 findings and their remediation commit in the release change record. Separately,
 obtain the formal independent external audit and record its findings,

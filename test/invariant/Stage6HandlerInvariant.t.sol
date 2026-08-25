@@ -4,13 +4,13 @@ pragma solidity 0.8.34;
 import {Test} from "forge-std/Test.sol";
 import {BlueMidnightAdapter} from "../../src/BlueMidnightAdapter.sol";
 import {MarketParams} from "morpho-blue/interfaces/IMorpho.sol";
-import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
-import {Market, CollateralParams, Offer} from "midnight/interfaces/IMidnight.sol";
+import {Market, Offer} from "midnight/interfaces/IMidnight.sol";
 import {ExitToken, ExitVault, ExitMorpho, ExitMidnight} from "../unit/BlueMidnightAdapterExit.t.sol";
 import {MarketEconomicPolicy} from "../../src/types/AdapterTypes.sol";
+import {AdapterTestMarket} from "../utils/AdapterTestMarket.sol";
 
 /// @notice Stateful caller harness for the Stage 6 adapter boundary.
-/// @dev Every target method uses the same valid market and impersonates the caller
+/// @dev Every target method uses the same exact pinned market and impersonates the caller
 ///      authorized by the production adapter (vault or sentinel).
 contract Stage6AdapterHandler is Test {
     ExitToken public immutable token;
@@ -20,7 +20,7 @@ contract Stage6AdapterHandler is Test {
     BlueMidnightAdapter public immutable adapter;
     MarketParams public blueMarket;
     Market public midnightMarket;
-    bytes32 public immutable midnightMarketId;
+    bytes32 public immutable marketHash;
     address internal constant SENTINEL = address(0xBEEF);
 
     constructor(
@@ -39,7 +39,7 @@ contract Stage6AdapterHandler is Test {
         adapter = adapter_;
         blueMarket = blueMarket_;
         midnightMarket = midnightMarket_;
-        midnightMarketId = HashLib.hashMarket(midnightMarket_);
+        marketHash = adapter_.pinnedMidnightMarketHash();
     }
 
     function allocate(uint256 requested) external {
@@ -64,27 +64,30 @@ contract Stage6AdapterHandler is Test {
         uint256 available = adapter.expectedSupplyAssets();
         uint256 assets = available == 0 ? 0 : requested % (available + 1);
         if (assets == 0) return;
+        if (assets > adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash())) return;
         midnight.invokeBuy(address(adapter), midnightMarket, assets, assets);
     }
 
     function repay(uint256 requested) external {
-        uint256 credit = adapter.marketAccounting(midnightMarketId).trackedCredit;
+        uint256 credit = adapter.accounting().trackedCredit;
         if (credit == 0) return;
         uint256 units = requested % (credit + 1);
         if (units == 0) return;
         token.mint(address(midnight), units);
         midnight.seed(midnightMarket, credit, units, 0);
-        adapter.collectRepayments(_markets(midnightMarket), _units(units));
+        adapter.collectRepayment(units);
     }
 
     function sell(uint256 requested) external {
-        uint256 credit = adapter.marketAccounting(midnightMarketId).trackedCredit;
+        uint256 credit = adapter.accounting().trackedCredit;
         if (credit == 0) return;
         uint256 units = requested % (credit + 1);
         if (units == 0) return;
         token.mint(address(midnight), units);
         midnight.seed(midnightMarket, credit, 0, units);
-        midnight.take(_offer(), hex"", units, address(adapter), address(adapter), address(adapter), hex"");
+        Offer memory offer = _offer(units);
+        if (!adapter.acceptsOffer(offer)) return;
+        midnight.take(offer, hex"", units, address(0xCAFE), address(adapter), address(adapter), hex"");
     }
 
     function riskOff() external {
@@ -93,34 +96,24 @@ contract Stage6AdapterHandler is Test {
         adapter.riskOff(bytes32("handler-risk-off"));
     }
 
-    function _offer() internal view returns (Offer memory) {
+    function _offer(uint256 units) internal view returns (Offer memory) {
         return Offer({
             market: midnightMarket,
-            buy: true,
-            maker: address(0xCAFE),
+            buy: false,
+            maker: address(adapter),
             start: block.timestamp,
             expiry: block.timestamp + 1 days,
             tick: 1,
-            group: bytes32(0),
-            callback: address(0),
+            group: keccak256(abi.encode(address(adapter), adapter.policyEpoch())),
+            callback: address(adapter),
             callbackData: hex"",
-            receiverIfMakerIsSeller: address(0),
+            receiverIfMakerIsSeller: address(adapter),
             ratifier: address(5),
-            reduceOnly: false,
-            maxUnits: 0,
-            maxAssets: type(uint128).max,
+            reduceOnly: true,
+            maxUnits: uint128(units),
+            maxAssets: 0,
             continuousFeeCap: 0
         });
-    }
-
-    function _markets(Market memory value) internal pure returns (Market[] memory values) {
-        values = new Market[](1);
-        values[0] = value;
-    }
-
-    function _units(uint256 value) internal pure returns (uint256[] memory values) {
-        values = new uint256[](1);
-        values[0] = value;
     }
 }
 
@@ -133,31 +126,26 @@ contract Stage6HandlerInvariantTest is Test {
     Stage6AdapterHandler handler;
     MarketParams blueMarket;
     Market midnightMarket;
-    bytes32 midnightMarketId;
+    bytes32 marketHash;
 
     function setUp() public {
         token = new ExitToken();
         vault = new ExitVault(address(token));
         morpho = new ExitMorpho(address(token));
         midnight = new ExitMidnight(address(token));
-        adapter = new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(5));
+        midnightMarket = AdapterTestMarket.make(address(midnight), address(token));
         blueMarket = MarketParams(address(token), address(1), address(2), address(3), 0);
-        _execute(abi.encodeWithSelector(adapter.setBlueMarket.selector, blueMarket));
-
-        midnightMarket = Market({
-            chainId: block.chainid,
-            midnight: address(midnight),
-            loanToken: address(token),
-            collateralParams: new CollateralParams[](0),
-            maturity: block.timestamp + 30 days,
-            rcfThreshold: 0,
-            enterGate: address(0),
-            liquidatorGate: address(0)
-        });
-        midnightMarketId = HashLib.hashMarket(midnightMarket);
-        _execute(abi.encodeWithSelector(adapter.setMarketEconomicPolicy.selector, midnightMarketId, _policy()));
-        _execute(abi.encodeWithSelector(adapter.setMarketPolicy.selector, midnightMarketId, 1_000_000, 1_000_000, true));
-        _execute(abi.encodeWithSelector(adapter.setExposureCaps.selector, 1_000_000, 1_000_000));
+        adapter = new BlueMidnightAdapter(
+            address(vault),
+            blueMarket,
+            address(midnight),
+            address(morpho),
+            address(5),
+            midnightMarket,
+            _policy(),
+            address(this)
+        );
+        marketHash = adapter.pinnedMidnightMarketHash();
 
         handler = new Stage6AdapterHandler(token, vault, morpho, midnight, adapter, blueMarket, midnightMarket);
         targetContract(address(handler));
@@ -180,14 +168,7 @@ contract Stage6HandlerInvariantTest is Test {
     }
 
     function invariant_riskOffCannotBeBypassed() public view {
-        if (adapter.riskOffActive()) assertEq(adapter.buyerAssetsBound(midnightMarketId), 0);
-    }
-
-    function _execute(bytes memory data) internal {
-        adapter.submit(data);
-        vm.warp(adapter.executableAt(data));
-        (bool ok,) = address(adapter).call(data);
-        assertTrue(ok);
+        if (adapter.riskOffActive()) assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 0);
     }
 
     function _policy() internal pure returns (MarketEconomicPolicy memory policy) {

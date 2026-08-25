@@ -16,6 +16,27 @@ remappings = [
     "morpho-blue/=lib/morpho-blue/src/"
 ]
 
+# Release bytecode is always measured with this named profile. Keep these
+# settings explicit so a developer's ambient FOUNDRY_PROFILE cannot silently
+# change the deployment-size gate.
+[profile.deployment]
+solc_version = "0.8.34"
+evm_version = "osaka"
+optimizer = true
+optimizer_runs = 200
+via_ir = true
+libs = ["lib"]
+src = "src"
+out = "out"
+test = "test"
+script = "script"
+remappings = [
+    "forge-std/=lib/forge-std/src/",
+    "midnight/=lib/midnight/src/",
+    "vault-v2/=lib/vault-v2/src/",
+    "morpho-blue/=lib/morpho-blue/src/"
+]
+
 [fmt]
 line_length = 120
 wrap_comments = true

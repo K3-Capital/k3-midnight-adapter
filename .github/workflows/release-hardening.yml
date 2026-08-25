@@ -1,0 +1,40 @@
+name: release-hardening
+
+on:
+  push:
+    branches: [main, 'simplify/**']
+  pull_request:
+
+jobs:
+  foundry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Generate pinned core artifacts
+        run: ./script/build-pinned-core-artifacts.sh
+      - name: Format check
+        run: forge fmt --check
+      - name: Deterministic release gate
+        run: python3 script/check_release_gate.py
+      - name: Hostile environment gate regression
+        run: python3 test/test_check_release_gate.py
+      - name: Unit tests
+        run: forge test --match-path 'test/unit/**' -vvv
+      - name: Fuzz tests
+        run: forge test --match-path 'test/fuzz/**' -vvv
+      - name: Invariant tests
+        run: forge test --match-path 'test/invariant/**' -vvv
+      - name: Integration tests
+        run: forge test --match-path 'test/integration/**' -vvv
+      - name: Full suite
+        run: forge test --summary
+      - name: ABI artifacts
+        run: python3 script/export_abis.py --check
+      - name: Diff hygiene
+        run: git diff --check

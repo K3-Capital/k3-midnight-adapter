@@ -3,7 +3,9 @@ pragma solidity 0.8.34;
 
 import {Test} from "forge-std/Test.sol";
 import {BlueMidnightAdapter} from "../../src/BlueMidnightAdapter.sol";
-import {Market} from "midnight/interfaces/IMidnight.sol";
+import {Market, CollateralParams} from "midnight/interfaces/IMidnight.sol";
+import {MarketParams} from "morpho-blue/interfaces/IMorpho.sol";
+import {MarketEconomicPolicy} from "../../src/types/AdapterTypes.sol";
 
 contract CallbackVaultMock {
     address public immutable token;
@@ -42,7 +44,28 @@ contract BlueMidnightAdapterCallbacksTest is Test {
     function setUp() public {
         CallbackTokenMock token = new CallbackTokenMock();
         vault = new CallbackVaultMock(address(token));
-        adapter = new BlueMidnightAdapter(address(vault), address(0x200), address(0x300), address(0x400));
+        Market memory midnightMarket = Market({
+            chainId: block.chainid,
+            midnight: address(0x200),
+            loanToken: address(token),
+            collateralParams: new CollateralParams[](0),
+            maturity: block.timestamp + 30 days,
+            rcfThreshold: 0,
+            enterGate: address(0),
+            liquidatorGate: address(0)
+        });
+        MarketParams memory blueMarket = MarketParams(address(token), address(1), address(2), address(3), 0);
+        MarketEconomicPolicy memory policy = MarketEconomicPolicy(1_000, 0, 30 days, 20 days, 0, 0, true);
+        adapter = new BlueMidnightAdapter(
+            address(vault),
+            blueMarket,
+            address(0x200),
+            address(0x300),
+            address(0x400),
+            midnightMarket,
+            policy,
+            address(this)
+        );
     }
 
     function testBuyRejectsNonMidnightCaller() public {

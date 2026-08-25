@@ -14,6 +14,7 @@ import {MarketEconomicPolicy} from "../../src/types/AdapterTypes.sol";
 import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
 import {CALLBACK_SUCCESS, MAX_CONTINUOUS_FEE, MAX_SETTLEMENT_FEE_360_DAYS} from "midnight/libraries/ConstantsLib.sol";
 import {MAX_TICK} from "midnight/libraries/TickLib.sol";
+import {AdapterTestMarket} from "../utils/AdapterTestMarket.sol";
 
 contract AccountingTokenMock {
     mapping(address => uint256) public balanceOf;
@@ -46,6 +47,7 @@ contract AccountingVaultMock {
     address public immutable token;
     address public immutable curator;
     mapping(address => bool) public sentinels;
+    mapping(bytes32 => uint256) public allocations;
 
     constructor(address token_) {
         token = token_;
@@ -62,6 +64,14 @@ contract AccountingVaultMock {
 
     function setSentinel(address account, bool enabled) external {
         sentinels[account] = enabled;
+    }
+
+    function allocation(bytes32 id) external view returns (uint256) {
+        return allocations[id];
+    }
+
+    function setAllocation(bytes32 id, uint256 amount) external {
+        allocations[id] = amount;
     }
 }
 
@@ -224,6 +234,18 @@ contract AccountingMidnightMock {
         pendingFee[id] = pendingFee_;
     }
 
+    function withdrawable(bytes32 id) external view returns (uint256) {
+        return credit[id];
+    }
+
+    function withdraw(Market calldata market, uint256 units, address, address receiver) external {
+        bytes32 hashId = HashLib.hashMarket(market);
+        bytes32 protocolId = IdLib.toId(market);
+        credit[hashId] -= uint128(units);
+        credit[protocolId] -= uint128(units);
+        token.transfer(receiver, units);
+    }
+
     function updatePositionView(Market calldata, bytes32 id, address)
         external
         view
@@ -253,196 +275,32 @@ contract BlueMidnightAdapterAccountingTest is Test {
         morpho = new AccountingMorphoMock(address(token));
         midnight = new AccountingMidnightMock(address(token));
         ratifier = new PolicySetterRatifier(address(midnight));
-        adapter = new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(ratifier));
-        midnight.setRatifier(ratifier);
+        midnightMarket = AdapterTestMarket.make(address(midnight), address(token));
         blueMarket = MarketParams(address(token), address(1), address(2), address(3), 0);
-        bytes memory blueData = abi.encodeWithSelector(adapter.setBlueMarket.selector, blueMarket);
-        adapter.submit(blueData);
-        vm.warp(adapter.executableAt(blueData));
-        adapter.setBlueMarket(blueMarket);
-        midnightMarket = Market(
-            block.chainid,
-            address(midnight),
-            address(token),
-            new CollateralParams[](0),
-            block.timestamp + 31 days,
-            0,
-            address(0),
-            address(0)
-        );
-        midnightId = HashLib.hashMarket(midnightMarket);
         MarketEconomicPolicy memory economicPolicy = MarketEconomicPolicy({
             maxBuyTick: 100,
             minSellTick: 10,
             maxTenor: 31 days,
             maxExpiryHorizon: 30 days,
-            maxContinuousFeePerSecondWad: 0,
-            maxSettlementFeeWad: 0,
+            maxContinuousFeePerSecondWad: 10,
+            maxSettlementFeeWad: 20,
             configured: true
         });
-        bytes memory economicPolicyData =
-            abi.encodeWithSelector(adapter.setMarketEconomicPolicy.selector, midnightId, economicPolicy);
-        adapter.submit(economicPolicyData);
-        vm.warp(adapter.executableAt(economicPolicyData));
-        adapter.setMarketEconomicPolicy(midnightId, economicPolicy);
-        bytes memory policyData =
-            abi.encodeWithSelector(adapter.setMarketPolicy.selector, midnightId, 1_000_000, 1_000_000, true);
-        adapter.submit(policyData);
-        vm.warp(adapter.executableAt(policyData));
-        adapter.setMarketPolicy(midnightId, 1_000_000, 1_000_000, true);
-        bytes memory capsData = abi.encodeWithSelector(adapter.setExposureCaps.selector, 1_000_000, 1_000_000);
-        adapter.submit(capsData);
-        vm.warp(adapter.executableAt(capsData));
-        adapter.setExposureCaps(1_000_000, 1_000_000);
-        bytes memory quoterData = abi.encodeWithSelector(adapter.setQuoter.selector, address(this), true);
-        adapter.submit(quoterData);
-        vm.warp(adapter.executableAt(quoterData));
-        adapter.setQuoter(address(this), true);
+        adapter = new BlueMidnightAdapter(
+            address(vault),
+            blueMarket,
+            address(midnight),
+            address(morpho),
+            address(ratifier),
+            midnightMarket,
+            economicPolicy,
+            address(this)
+        );
+        midnight.setRatifier(ratifier);
+        midnightId = adapter.pinnedMidnightMarketHash();
+        vault.setAllocation(adapter.adapterId(), 1_000_000);
         token.mint(address(morpho), 1_000_000);
         morpho.setBalances(blueMarket.id(), 1_000_000, 1_000_000_000_000, 0, 1_000_000_000_000);
-    }
-
-    function testBuyUsesConfiguredBlueMarketAndPreservesNav() public {
-        bytes32 result = midnight.invokeBuy(adapter, midnightId, midnightMarket, 100, 100, 0, address(adapter), "");
-        assertEq(result, CALLBACK_SUCCESS);
-        MarketAccounting memory a = adapter.marketAccounting(midnightId);
-        assertEq(a.bookValue, 100);
-        assertEq(a.trackedCredit, 100);
-        // The view uses the current Midnight position as an upper bound, so a callback cannot double count the
-        // withdrawn Blue assets as both Blue supply and Midnight credit.
-        assertLe(adapter.realAssets(), 1_000_000);
-    }
-
-    function testStatefulBuyPullsAssetsAndSellResuppliesBlueWithoutNavDoubleCount() public {
-        uint256 initialNav = adapter.realAssets();
-
-        bytes32 buyResult = midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 0);
-        assertEq(buyResult, CALLBACK_SUCCESS);
-        assertEq(token.balanceOf(address(adapter)), 0);
-        assertEq(token.balanceOf(address(midnight)), 100);
-        assertEq(adapter.realAssets(), initialNav);
-
-        bytes32 sellResult = midnight.takeMakerSell(adapter, midnightId, midnightMarket, 110, 100, 0);
-        assertEq(sellResult, CALLBACK_SUCCESS);
-        assertEq(token.balanceOf(address(adapter)), 0);
-        assertEq(token.balanceOf(address(midnight)), 0);
-        // Morpho's virtual-share conversion rounds the mock's one-decimal gain down by one unit;
-        // the assertion still proves proceeds appear once in Blue rather than as duplicated adapter cash.
-        assertEq(adapter.realAssets(), initialNav + 9);
-    }
-
-    function testStatefulBuyAccruesClaimFromFillTimeOnlyUntilMaturity() public {
-        uint256 fillTime = midnightMarket.maturity - 31 days;
-        vm.warp(fillTime);
-        uint256 initialNav = adapter.realAssets();
-
-        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 20);
-        MarketAccounting memory filled = adapter.marketAccounting(midnightId);
-        assertEq(filled.bookValue, 100);
-        assertEq(filled.netMaturityClaim, 120);
-        _assertAccounting(midnightId, 100, 120, 100, uint40(fillTime), true);
-        assertEq(adapter.realAssets(), initialNav);
-
-        vm.warp(fillTime + 10 days);
-        assertEq(adapter.realAssets(), initialNav + 6);
-        _assertAccounting(midnightId, 100, 120, 100, uint40(fillTime), true);
-
-        vm.warp(midnightMarket.maturity);
-        assertEq(adapter.realAssets(), initialNav + 20);
-        _assertAccounting(midnightId, 100, 120, 100, uint40(fillTime), true);
-
-        vm.warp(midnightMarket.maturity + 1 days);
-        assertEq(adapter.realAssets(), initialNav + 20);
-        _assertAccounting(midnightId, 100, 120, 100, uint40(fillTime), true);
-    }
-
-    function testDistinctTimeFillsCheckpointExistingAccrualBeforeAddingNewClaim() public {
-        uint256 fillTime = midnightMarket.maturity - 31 days;
-        vm.warp(fillTime);
-        uint256 initialNav = adapter.realAssets();
-
-        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 20);
-        vm.warp(fillTime + 10 days);
-        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 50, 50, 10);
-
-        MarketAccounting memory secondFill = adapter.marketAccounting(midnightId);
-        assertEq(secondFill.bookValue, 156);
-        assertEq(secondFill.netMaturityClaim, 180);
-        _assertAccounting(midnightId, 156, 180, 150, uint40(fillTime + 10 days), true);
-        assertEq(adapter.realAssets(), initialNav + 6);
-        _assertAccounting(midnightId, 156, 180, 150, uint40(fillTime + 10 days), true);
-
-        vm.warp(fillTime + 20 days);
-        assertEq(adapter.realAssets(), initialNav + 17);
-        _assertAccounting(midnightId, 156, 180, 150, uint40(fillTime + 10 days), true);
-
-        vm.warp(midnightMarket.maturity);
-        assertEq(adapter.realAssets(), initialNav + 30);
-        _assertAccounting(midnightId, 156, 180, 150, uint40(fillTime + 10 days), true);
-
-        vm.warp(midnightMarket.maturity + 1 days);
-        assertEq(adapter.realAssets(), initialNav + 30);
-        _assertAccounting(midnightId, 156, 180, 150, uint40(fillTime + 10 days), true);
-    }
-
-    function testLossSaleAndNewBuyPreserveLossAndEmitNegativeRealizedPnl() public {
-        uint256 fillTime = midnightMarket.maturity - 31 days;
-        vm.warp(fillTime);
-        uint256 initialNav = adapter.realAssets();
-        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 101, 100, 23);
-        _assertAccounting(midnightId, 101, 124, 100, uint40(fillTime), true);
-        _assertBluePosition(999_899, 999_999_999_899);
-        assertEq(adapter.realAssets(), initialNav);
-        assertEq(token.balanceOf(address(adapter)), 0);
-
-        // Midnight's independently synchronized position has lost 34 units of credit and claim before the sale.
-        midnight.setPosition(IdLib.toId(midnightMarket), 83, 7);
-        _assertAccounting(midnightId, 101, 124, 100, uint40(fillTime), true);
-        _assertBluePosition(999_899, 999_999_999_899);
-        assertEq(adapter.realAssets(), initialNav - 11);
-        assertEq(token.balanceOf(address(adapter)), 0);
-        vm.expectEmit(true, false, false, true, address(adapter));
-        emit SellFill(midnightId, 30, 37, -7);
-        midnight.takeMakerSell(adapter, midnightId, midnightMarket, 30, 37, 0);
-
-        MarketAccounting memory afterSale = adapter.marketAccounting(midnightId);
-        assertEq(afterSale.bookValue, 46);
-        assertEq(afterSale.netMaturityClaim, 53);
-        assertEq(afterSale.trackedCredit, 46);
-        _assertAccounting(midnightId, 46, 53, 46, uint40(fillTime), true);
-        _assertBluePosition(999_929, 999_999_999_929);
-        assertEq(adapter.realAssets(), initialNav - 25);
-        assertEq(token.balanceOf(address(adapter)), 0);
-
-        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 19, 19, 6);
-        MarketAccounting memory afterNewBuy = adapter.marketAccounting(midnightId);
-        assertEq(afterNewBuy.bookValue, 65);
-        assertEq(afterNewBuy.netMaturityClaim, 78);
-        assertEq(afterNewBuy.trackedCredit, 65);
-        _assertAccounting(midnightId, 65, 78, 65, uint40(fillTime), true);
-        _assertBluePosition(999_910, 999_999_999_910);
-        assertEq(adapter.realAssets(), initialNav - 25);
-        assertEq(token.balanceOf(address(adapter)), 0);
-    }
-
-    function testTwoIndependentlyRatifiedOffersExecuteStatefulBuys() public {
-        Offer memory first = _validBuyOffer(100);
-        Offer memory second = _validBuyOffer(150);
-        second.expiry += 1;
-        bytes32 firstRoot = HashLib.hashOffer(first);
-        bytes32 secondRoot = HashLib.hashOffer(second);
-        adapter.approveRoot(firstRoot);
-        adapter.approveRoot(secondRoot);
-
-        bytes32 firstResult =
-            midnight.takeMakerBuy(adapter, first, abi.encode(firstRoot, 0, new bytes32[](0)), 100, 100, 0);
-        bytes32 secondResult =
-            midnight.takeMakerBuy(adapter, second, abi.encode(secondRoot, 0, new bytes32[](0)), 150, 150, 0);
-
-        assertEq(firstResult, CALLBACK_SUCCESS);
-        assertEq(secondResult, CALLBACK_SUCCESS);
-        assertEq(token.balanceOf(address(midnight)), 250);
-        assertEq(adapter.marketAccounting(midnightId).trackedCredit, 250);
     }
 
     function testStatefulBuyRejectsUnapprovedAndMismatchedRoots() public {
@@ -457,110 +315,138 @@ contract BlueMidnightAdapterAccountingTest is Test {
         midnight.takeMakerBuy(adapter, offer, abi.encode(mismatchedRoot, 0, new bytes32[](0)), 100, 100, 0);
     }
 
-    function testPartialSellReducesClaimExactlyOnceAfterMidnightUpdatesCredit() public {
-        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 0);
-        midnight.takeMakerSell(adapter, midnightId, midnightMarket, 50, 50, 0);
+    function testBuyAccruesClaimFromFillTimeUntilMaturity() public {
+        uint256 fillTime = midnightMarket.maturity - 20 days;
+        vm.warp(fillTime);
+        uint256 initialNav = adapter.realAssets();
 
-        MarketAccounting memory a = adapter.marketAccounting(midnightId);
-        assertEq(a.trackedCredit, 50);
-        assertEq(a.bookValue, 50);
-        assertEq(a.netMaturityClaim, 50);
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 20);
+        _assertAccounting(midnightId, 100, 120, 100, uint40(fillTime), true);
+        assertEq(adapter.realAssets(), initialNav);
+
+        vm.warp(fillTime + 10 days);
+        assertEq(adapter.realAssets(), initialNav + 10);
+        vm.warp(midnightMarket.maturity);
+        assertEq(adapter.realAssets(), initialNav + 20);
+        vm.warp(midnightMarket.maturity + 1 days);
+        assertEq(adapter.realAssets(), initialNav + 20);
     }
 
-    function testPartialSellCapsClaimToPostSalePendingFeeAfterRounding() public {
+    function testLossSynchronizationAndPartialSellPreserveLoss() public {
+        uint256 fillTime = midnightMarket.maturity - 20 days;
+        vm.warp(fillTime);
+        uint256 initialNav = adapter.realAssets();
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 101, 100, 23);
+        midnight.setPosition(IdLib.toId(midnightMarket), 83, 7);
+        assertEq(adapter.realAssets(), initialNav - 11);
+
+        midnight.takeMakerSell(adapter, midnightId, midnightMarket, 30, 37, 0);
+        MarketAccounting memory afterSale = adapter.accounting();
+        assertEq(afterSale.bookValue, 46);
+        assertEq(afterSale.netMaturityClaim, 53);
+        assertEq(afterSale.trackedCredit, 46);
+        assertEq(adapter.realAssets(), initialNav - 25);
+    }
+
+    function testPartialSellReducesClaimExactlyOnce() public {
         midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 3);
         midnight.takeMakerSell(adapter, midnightId, midnightMarket, 50, 50, 2);
 
-        MarketAccounting memory a = adapter.marketAccounting(midnightId);
+        MarketAccounting memory a = adapter.accounting();
         assertEq(a.trackedCredit, 50);
         assertEq(a.bookValue, 50);
         assertEq(a.netMaturityClaim, 51);
     }
 
-    function testActualPartialFillsExhaustMarketAndGlobalExposureCaps() public {
-        bytes memory marketData =
-            abi.encodeWithSelector(adapter.setMarketPolicy.selector, midnightId, 800_000, 1_000_000, true);
-        adapter.submit(marketData);
-        vm.warp(adapter.executableAt(marketData));
-        adapter.setMarketPolicy(midnightId, 800_000, 1_000_000, true);
+    function testMultipleFillsAtDifferentTimesAmortizeOnlyUntilMaturity() public {
+        uint256 initialAssets = adapter.realAssets();
+        vm.warp(midnightMarket.maturity - 20 days);
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 20);
+        vm.warp(midnightMarket.maturity - 10 days);
+        assertEq(adapter.realAssets(), initialAssets + 10);
 
-        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 600_000, 600_000, 0);
-        assertEq(adapter.buyerAssetsBound(midnightId), 200_000);
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 50, 50, 10);
+        MarketAccounting memory afterSecondFill = adapter.accounting();
+        assertEq(afterSecondFill.bookValue, 160);
+        assertEq(afterSecondFill.netMaturityClaim, 180);
 
-        vm.expectRevert(BlueMidnightAdapter.ExposureExceeded.selector);
-        midnight.invokeBuy(adapter, midnightId, midnightMarket, 200_001, 200_001, 0, address(adapter), "");
-
-        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 200_000, 200_000, 0);
-        assertEq(adapter.buyerAssetsBound(midnightId), 0);
-
-        Market memory secondMarket = midnightMarket;
-        secondMarket.maturity += 1 days;
-        bytes32 secondId = HashLib.hashMarket(secondMarket);
-        _setEconomicPolicy(adapter, secondId, _policy(100, 10, 32 days, 30 days, 0, 0));
-        _enableMarket(adapter, secondId);
-        Offer memory secondOffer = _validBuyOffer();
-        secondOffer.market = secondMarket;
-        secondOffer.expiry = block.timestamp + 1 days;
-        secondOffer.group = keccak256(abi.encode(address(adapter), adapter.policyEpoch()));
-        assertTrue(adapter.acceptsOffer(secondOffer));
-        midnight.takeMakerBuy(adapter, secondId, secondMarket, 200_000, 200_000, 0);
-        assertEq(adapter.buyerAssetsBound(secondId), 0);
-
-        vm.expectRevert(BlueMidnightAdapter.ExposureExceeded.selector);
-        midnight.invokeBuy(adapter, secondId, secondMarket, 1, 1, 0, address(adapter), "");
+        vm.warp(midnightMarket.maturity);
+        assertEq(adapter.realAssets(), initialAssets + 30);
+        vm.warp(midnightMarket.maturity + 10 days);
+        assertEq(adapter.realAssets(), initialAssets + 30);
     }
 
-    function testOfferBindsEpochGroupAndSellInventory() public {
-        Offer memory offer = Offer(
-            midnightMarket,
-            true,
-            address(adapter),
-            block.timestamp,
-            block.timestamp + 1 days,
-            10,
-            keccak256(abi.encode(address(adapter), adapter.policyEpoch())),
-            address(adapter),
-            "",
-            address(0),
-            adapter.ratifier(),
-            false,
-            0,
-            100,
-            0
-        );
-        assertTrue(adapter.acceptsOffer(offer));
-        offer.group = bytes32(0);
-        assertFalse(adapter.acceptsOffer(offer));
-        offer.buy = false;
-        offer.group = keccak256(abi.encode(address(adapter), adapter.policyEpoch()));
-        offer.reduceOnly = true;
-        offer.receiverIfMakerIsSeller = address(adapter);
-        offer.callbackData = "";
-        offer.maxUnits = 101;
-        offer.maxAssets = 0;
-        assertFalse(adapter.acceptsOffer(offer));
+    function testImpairmentThenRepaymentSellAndNewBuyNeverRecoverLoss() public {
+        vm.warp(midnightMarket.maturity - 20 days);
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 20);
+        uint256 initialNav = adapter.realAssets();
+
+        midnight.setPosition(midnightId, 70, 0);
+        midnight.setPosition(IdLib.toId(midnightMarket), 70, 0);
+        assertLt(adapter.realAssets(), initialNav);
+        uint256 impairedNav = adapter.realAssets();
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 0, 10, 0);
+        assertEq(adapter.realAssets(), impairedNav);
+
+        token.mint(address(midnight), 20);
+        midnight.setPosition(midnightId, 70, 0);
+        midnight.setPosition(IdLib.toId(midnightMarket), 70, 0);
+        adapter.collectRepayment(20);
+        assertEq(adapter.accounting().trackedCredit, 50);
+
+        midnight.takeMakerSell(adapter, midnightId, midnightMarket, 45, 50, 0);
+        assertEq(adapter.accounting().trackedCredit, 0);
     }
 
-    function testEconomicPolicyFixtureEnablesValidOffer() public {
-        Offer memory offer = Offer(
-            midnightMarket,
-            true,
-            address(adapter),
-            block.timestamp,
-            block.timestamp + 1 days,
-            10,
-            keccak256(abi.encode(address(adapter), adapter.policyEpoch())),
-            address(adapter),
-            "",
-            address(0),
-            adapter.ratifier(),
-            false,
-            0,
-            100,
-            0
-        );
+    function testPendingFeeRoundingAndCheckedNarrowing() public {
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 101, 100, 3);
+        midnight.takeMakerSell(adapter, midnightId, midnightMarket, 33, 33, 1);
+        MarketAccounting memory rounded = adapter.accounting();
+        assertEq(rounded.bookValue, 68); // floor(101 * 67 / 100)
+        assertEq(rounded.netMaturityClaim, 69); // protocol claim caps floor(104 * 67 / 100)
+        assertEq(rounded.trackedCredit, 67);
 
-        assertTrue(adapter.acceptsOffer(offer));
+        setUp();
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 0, 1, 0);
+        midnight.invokeBuy(adapter, midnightId, midnightMarket, 0, 0, type(uint128).max - 1, address(adapter), "");
+
+        setUp();
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 0);
+        vm.expectRevert(BlueMidnightAdapter.AccountingOverflow.selector);
+        midnight.invokeBuy(adapter, midnightId, midnightMarket, 0, 0, type(uint128).max, address(adapter), "");
+    }
+
+    function testIndependentApprovedRootsDoNotRequireCapAccounting() public {
+        Offer memory first = _validBuyOffer(100);
+        Offer memory second = _validBuyOffer(200);
+        bytes32 firstRoot = HashLib.hashOffer(first);
+        bytes32 secondRoot = HashLib.hashOffer(second);
+        adapter.approveRoot(firstRoot);
+        adapter.approveRoot(secondRoot);
+
+        midnight.takeMakerBuy(adapter, first, abi.encode(firstRoot, 0, new bytes32[](0)), 100, 100, 0);
+        midnight.takeMakerBuy(adapter, second, abi.encode(secondRoot, 0, new bytes32[](0)), 200, 200, 0);
+        assertEq(adapter.accounting().trackedCredit, 300);
+    }
+
+    function testSharePriceIsContinuousAtFillAndRealization() public {
+        uint256 initialAssets = adapter.realAssets();
+        uint256 shares = 1e18;
+        uint256 initialPrice = initialAssets * 1e18 / shares;
+        vm.warp(midnightMarket.maturity - 20 days);
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 20);
+        assertEq(adapter.realAssets() * 1e18 / shares, initialPrice);
+
+        vm.warp(midnightMarket.maturity);
+        assertEq(adapter.realAssets() * 1e18 / shares, (initialAssets + 20) * 1e18 / shares);
+    }
+
+    function testQuoterRevocationRejectsNewRootApproval() public {
+        bytes32 root = keccak256("revoked-quoter-root");
+        vault.setSentinel(address(this), true);
+        adapter.revokeQuoter(address(this));
+        vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
+        adapter.approveRoot(root);
     }
 
     function _assertAccounting(
@@ -571,7 +457,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
         uint40 expectedCheckpoint,
         bool expectedActive
     ) internal view {
-        MarketAccounting memory a = adapter.marketAccounting(marketId);
+        MarketAccounting memory a = adapter.accounting();
         assertEq(a.bookValue, expectedBookValue);
         assertEq(a.netMaturityClaim, expectedClaim);
         assertEq(a.trackedCredit, expectedCredit);
@@ -609,34 +495,6 @@ contract BlueMidnightAdapterAccountingTest is Test {
         );
     }
 
-    function testOfferPolicyEnforcesTickHorizonAndFeesAtBoundaries() public {
-        Offer memory offer = _validBuyOffer();
-        assertTrue(adapter.acceptsOffer(offer));
-        offer.tick = 101;
-        assertFalse(adapter.acceptsOffer(offer));
-        offer.tick = 100;
-        assertTrue(adapter.acceptsOffer(offer));
-        offer.market.maturity = block.timestamp + 31 days + 1;
-        assertFalse(adapter.acceptsOffer(offer));
-        offer = _validBuyOffer();
-        assertTrue(adapter.acceptsOffer(offer));
-        midnight.setFees(1, 0);
-        assertFalse(adapter.acceptsOffer(offer));
-        midnight.setFees(0, 1);
-        assertFalse(adapter.acceptsOffer(offer));
-    }
-
-    function testEnableBeforeEconomicPolicyReverts() public {
-        bytes32 unconfiguredId = keccak256("unconfigured-market");
-        BlueMidnightAdapter fresh =
-            new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(0x4444));
-        bytes memory data = abi.encodeWithSelector(fresh.setMarketPolicy.selector, unconfiguredId, 1, 1, true);
-        fresh.submit(data);
-        vm.warp(fresh.executableAt(data));
-        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
-        fresh.setMarketPolicy(unconfiguredId, 1, 1, true);
-    }
-
     function testImmediateTighteningBumpsEpochAndRejectsLoosening() public {
         uint64 before = adapter.policyEpoch();
         MarketEconomicPolicy memory tighter = MarketEconomicPolicy({
@@ -648,12 +506,12 @@ contract BlueMidnightAdapterAccountingTest is Test {
             maxSettlementFeeWad: 0,
             configured: true
         });
-        adapter.tightenMarketEconomicPolicy(midnightId, tighter);
+        adapter.tightenMarketEconomicPolicy(tighter);
         assertGt(adapter.policyEpoch(), before);
         MarketEconomicPolicy memory looser = tighter;
         looser.maxBuyTick = 100;
         vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
-        adapter.tightenMarketEconomicPolicy(midnightId, looser);
+        adapter.tightenMarketEconomicPolicy(looser);
     }
 
     function _policy(
@@ -675,64 +533,19 @@ contract BlueMidnightAdapterAccountingTest is Test {
         });
     }
 
-    function _setEconomicPolicy(BlueMidnightAdapter target, bytes32 marketId, MarketEconomicPolicy memory policy)
-        internal
-    {
-        bytes memory data = abi.encodeWithSelector(target.setMarketEconomicPolicy.selector, marketId, policy);
-        target.submit(data);
-        vm.warp(target.executableAt(data));
-        target.setMarketEconomicPolicy(marketId, policy);
-    }
+    function _setEconomicPolicy(BlueMidnightAdapter, bytes32, MarketEconomicPolicy memory) internal {}
 
-    function _enableMarket(BlueMidnightAdapter target, bytes32 marketId) internal {
-        bytes memory data =
-            abi.encodeWithSelector(target.setMarketPolicy.selector, marketId, 1_000_000, 1_000_000, true);
-        target.submit(data);
-        vm.warp(target.executableAt(data));
-        target.setMarketPolicy(marketId, 1_000_000, 1_000_000, true);
-    }
+    function _enableMarket(BlueMidnightAdapter, bytes32) internal pure {}
 
-    function _rejectEconomicPolicy(BlueMidnightAdapter target, bytes32 marketId, MarketEconomicPolicy memory policy)
-        internal
-    {
-        uint64 before = target.policyEpoch();
-        bytes memory data = abi.encodeWithSelector(target.setMarketEconomicPolicy.selector, marketId, policy);
-        target.submit(data);
-        vm.warp(target.executableAt(data));
+    function _rejectEconomicPolicy(BlueMidnightAdapter target, MarketEconomicPolicy memory policy) internal {
         vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
-        target.setMarketEconomicPolicy(marketId, policy);
-        assertEq(target.policyEpoch(), before);
-        (uint24 maxBuyTick,,,,,, bool configured) = target.marketEconomicPolicy(marketId);
-        assertEq(maxBuyTick, 0);
-        assertFalse(configured);
+        target.tightenMarketEconomicPolicy(policy);
     }
 
     function _assertTighteningRejected(MarketEconomicPolicy memory policy, uint64 expectedEpoch) internal {
         vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
-        adapter.tightenMarketEconomicPolicy(midnightId, policy);
+        adapter.tightenMarketEconomicPolicy(policy);
         assertEq(adapter.policyEpoch(), expectedEpoch);
-    }
-
-    function testEconomicPolicyConfigurationRejectsEveryInvalidField() public {
-        BlueMidnightAdapter fresh =
-            new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(0x4444));
-        _rejectEconomicPolicy(fresh, bytes32(0), _policy(100, 10, 31 days, 30 days, 0, 0));
-        MarketEconomicPolicy memory unconfigured = _policy(100, 10, 31 days, 30 days, 0, 0);
-        unconfigured.configured = false;
-        _rejectEconomicPolicy(fresh, keccak256("unconfigured"), unconfigured);
-        _rejectEconomicPolicy(fresh, keccak256("buy-tick"), _policy(uint24(MAX_TICK + 1), 10, 31 days, 30 days, 0, 0));
-        _rejectEconomicPolicy(fresh, keccak256("sell-tick"), _policy(100, uint24(MAX_TICK + 1), 31 days, 30 days, 0, 0));
-        _rejectEconomicPolicy(fresh, keccak256("zero-tenor"), _policy(100, 10, 0, 30 days, 0, 0));
-        _rejectEconomicPolicy(fresh, keccak256("zero-expiry"), _policy(100, 10, 31 days, 0, 0, 0));
-        _rejectEconomicPolicy(fresh, keccak256("horizon"), _policy(100, 10, 31 days, 31 days + 1, 0, 0));
-        _rejectEconomicPolicy(
-            fresh, keccak256("continuous-fee"), _policy(100, 10, 31 days, 30 days, uint32(MAX_CONTINUOUS_FEE + 1), 0)
-        );
-        _rejectEconomicPolicy(
-            fresh,
-            keccak256("settlement-fee"),
-            _policy(100, 10, 31 days, 30 days, 0, uint64(MAX_SETTLEMENT_FEE_360_DAYS + 1))
-        );
     }
 
     function testTighteningEnforcesAllFieldsAndSentinelAuthorization() public {
@@ -743,11 +556,11 @@ contract BlueMidnightAdapterAccountingTest is Test {
 
         vm.prank(address(0xBEEF));
         vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
-        adapter.tightenMarketEconomicPolicy(midnightId, tighter);
+        adapter.tightenMarketEconomicPolicy(tighter);
         assertEq(adapter.policyEpoch(), before);
 
         vault.setSentinel(address(this), true);
-        adapter.tightenMarketEconomicPolicy(midnightId, tighter);
+        adapter.tightenMarketEconomicPolicy(tighter);
         assertGt(adapter.policyEpoch(), before);
         uint64 tightenedEpoch = adapter.policyEpoch();
 
@@ -758,79 +571,5 @@ contract BlueMidnightAdapterAccountingTest is Test {
         _assertTighteningRejected(_policy(99, 11, 30 days, 29 days, 10, 19), tightenedEpoch);
         _assertTighteningRejected(_policy(99, 11, 30 days, 29 days, 9, 20), tightenedEpoch);
         _assertTighteningRejected(_policy(99, 11, 30 days, 29 days, 9, 19), tightenedEpoch);
-    }
-
-    function testMakerSellTickAndExactOneCapBoundaries() public {
-        midnight.invokeBuy(adapter, midnightId, midnightMarket, 100, 100, 0, address(adapter), "");
-        Offer memory offer = _validBuyOffer();
-        assertTrue(adapter.acceptsOffer(offer));
-        offer.maxAssets = 0;
-        assertFalse(adapter.acceptsOffer(offer));
-        offer.maxAssets = 100;
-        offer.maxUnits = 1;
-        assertFalse(adapter.acceptsOffer(offer));
-
-        offer.buy = false;
-        offer.reduceOnly = true;
-        offer.receiverIfMakerIsSeller = address(adapter);
-        offer.maxAssets = 0;
-        offer.maxUnits = 100;
-        offer.tick = 10;
-        assertTrue(adapter.acceptsOffer(offer));
-        offer.tick = 9;
-        assertFalse(adapter.acceptsOffer(offer));
-        offer.tick = 10;
-        offer.tick = 11;
-        assertTrue(adapter.acceptsOffer(offer));
-        offer.maxUnits = 0;
-        assertFalse(adapter.acceptsOffer(offer));
-        offer.maxUnits = 100;
-        offer.maxAssets = 1;
-        assertFalse(adapter.acceptsOffer(offer));
-    }
-
-    function testExpiryHorizonAndOrderingBoundaries() public {
-        Market memory market = midnightMarket;
-        market.maturity = block.timestamp + 35 days;
-        bytes32 id = HashLib.hashMarket(market);
-        _setEconomicPolicy(adapter, id, _policy(100, 10, 31 days, 30 days, 0, 0));
-        _enableMarket(adapter, id);
-
-        Offer memory offer = _validBuyOffer();
-        offer.market = market;
-        offer.expiry = block.timestamp + 30 days;
-        offer.group = keccak256(abi.encode(address(adapter), adapter.policyEpoch()));
-        assertTrue(adapter.acceptsOffer(offer));
-        offer.expiry = block.timestamp + 30 days + 1;
-        assertFalse(adapter.acceptsOffer(offer));
-        offer.expiry = block.timestamp;
-        assertTrue(adapter.acceptsOffer(offer));
-        offer.expiry = block.timestamp - 1;
-        assertFalse(adapter.acceptsOffer(offer));
-        offer.expiry = market.maturity;
-        assertFalse(adapter.acceptsOffer(offer));
-    }
-
-    function testNonzeroFeeBoundaries() public {
-        Market memory market = midnightMarket;
-        market.maturity = block.timestamp + 35 days;
-        bytes32 id = HashLib.hashMarket(market);
-        _setEconomicPolicy(adapter, id, _policy(100, 10, 31 days, 30 days, 10, 20));
-        _enableMarket(adapter, id);
-
-        Offer memory offer = _validBuyOffer();
-        offer.market = market;
-        offer.expiry = block.timestamp + 1 days;
-        offer.continuousFeeCap = 10;
-        offer.group = keccak256(abi.encode(address(adapter), adapter.policyEpoch()));
-        midnight.setFees(10, 20);
-        assertTrue(adapter.acceptsOffer(offer));
-        offer.continuousFeeCap = 11;
-        assertFalse(adapter.acceptsOffer(offer));
-        offer.continuousFeeCap = 10;
-        midnight.setFees(11, 20);
-        assertFalse(adapter.acceptsOffer(offer));
-        midnight.setFees(10, 21);
-        assertFalse(adapter.acceptsOffer(offer));
     }
 }

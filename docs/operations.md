@@ -42,6 +42,7 @@ forge build
 forge test --match-path 'test/integration/**' -vvv
 forge test --summary
 python3 script/check_release_gate.py
+python3 test/test_check_release_gate.py
 ```
 
 The script uses temporary source roots and removes them on exit. If compiler
@@ -64,7 +65,7 @@ Run the gate from a clean checkout; its `out/` output is disposable and ignored.
 
 ## Preflight
 
-1. Confirm the approved stack base is `simplify/03-asynchronous-exits` at the
+1. Confirm the approved stack base is `simplify/04-immutable-deployment` at the
    exact lead-approved commit recorded in the change record.
 2. Pin the target chain, USDC address, Vault V2 address, Morpho Blue address,
    Midnight address, and ratifier address in an operator change record.
@@ -124,9 +125,9 @@ quoter, and Midnight market. Vault V2 governance must:
 3. Exercise allocation, callback, repayment, asynchronous maker-sell, and exact
    deallocation paths on the deterministic local deployment.
 
-The sentinel may only tighten policy, disable markets, revoke quoters, bump the
-risk-off epoch, and lower limits. Repayment collection remains available during
-risk-off.
+The sentinel may only tighten policy for the pinned market, revoke the approved
+quoter, bump the risk-off epoch, and lower limits. Repayment collection remains
+available during risk-off.
 
 ## Monitoring
 

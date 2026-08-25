@@ -16,9 +16,24 @@ DEPLOYABLE = ("BlueMidnightAdapter", "PolicySetterRatifier")
 
 
 def build() -> None:
-    env = os.environ.copy()
+    # Foundry gives individual FOUNDRY_* / DAPP_* variables precedence over a
+    # named profile. Remove them rather than claiming a profile is sufficient.
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("FOUNDRY_", "DAPP_"))}
     env["FOUNDRY_PROFILE"] = "deployment"
     subprocess.run(["forge", "build", "--skip", "test"], cwd=ROOT, env=env, check=True)
+
+
+def verify_profile() -> None:
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("FOUNDRY_", "DAPP_"))}
+    env["FOUNDRY_PROFILE"] = "deployment"
+    result = subprocess.run(
+        ["forge", "config", "--json"], cwd=ROOT, env=env, check=True, capture_output=True, text=True
+    )
+    config = json.loads(result.stdout)
+    expected = {"optimizer": True, "optimizer_runs": 200, "via_ir": True, "evm_version": "osaka"}
+    mismatches = {key: (config.get(key), value) for key, value in expected.items() if config.get(key) != value}
+    if mismatches:
+        raise RuntimeError(f"deployment profile mismatch: {mismatches}")
 
 
 def byte_length(artifact: Path, field: str) -> int:
@@ -29,6 +44,7 @@ def byte_length(artifact: Path, field: str) -> int:
 
 
 def main() -> int:
+    verify_profile()
     build()
     failures: list[str] = []
     report: list[str] = []

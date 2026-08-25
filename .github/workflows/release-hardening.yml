@@ -22,6 +22,8 @@ jobs:
         run: forge fmt --check
       - name: Deterministic release gate
         run: python3 script/check_release_gate.py
+      - name: Hostile environment gate regression
+        run: python3 test/test_check_release_gate.py
       - name: Unit tests
         run: forge test --match-path 'test/unit/**' -vvv
       - name: Fuzz tests

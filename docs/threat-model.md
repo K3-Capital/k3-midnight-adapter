@@ -9,7 +9,7 @@ interfaces and callback ordering are assumptions that must be checked again
 when dependencies change.
 
 The constructor pins the Blue market, Midnight market, economic policy, ratifier,
-and quoter. There is no selector-timelock or factory deployment surface.
+and quoter. There is no generic governance-dispatch or custom deployment surface.
 Configuration expansion requires deploying a replacement adapter and
 registering/capping it through Vault V2 governance. The sentinel can reduce risk
 immediately but cannot expand it. The quoter may only approve roots through the

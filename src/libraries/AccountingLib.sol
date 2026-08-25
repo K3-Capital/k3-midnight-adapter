@@ -9,6 +9,7 @@ library AccountingLib {
     /// @dev Explicit checked narrowing; callers rely on reverting rather than wrapping.
     function toUint128(uint256 value) internal pure returns (uint128) {
         if (value > type(uint128).max) revert NarrowingOverflow();
+        // forge-lint: disable-next-line(unsafe-typecast)
         return uint128(value);
     }
 

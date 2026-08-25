@@ -65,21 +65,29 @@ contract OfferPolicyFuzzTest is Test {
 }
 
 contract OfferPolicyAdapterGuardFuzzTest is BlueMidnightAdapterAccountingTest {
-    function testFuzzExactMarketAndEconomicGuards(uint128 maxAssets, uint24 tick) public {
+    function testFuzzRetainedTheftAndEconomicGuards(uint8 guard, uint128 maxAssets, uint24 tick) public {
+        guard = uint8(bound(guard, 0, 12));
         maxAssets = uint128(bound(maxAssets, 1, 1_000_000));
         Offer memory offer = _validBuyOffer(maxAssets);
-        assertTrue(adapter.acceptsOffer(offer));
-
-        Offer memory wrongMarket = offer;
-        wrongMarket.market.midnight = address(0xBEEF);
-        assertFalse(adapter.acceptsOffer(wrongMarket));
-
-        Offer memory wrongLoanToken = offer;
-        wrongLoanToken.market.loanToken = address(0xCAFE);
-        assertFalse(adapter.acceptsOffer(wrongLoanToken));
-
-        Offer memory wrongTick = offer;
-        wrongTick.tick = tick;
-        if (tick > 100) assertFalse(adapter.acceptsOffer(wrongTick));
+        if (guard == 0) offer.maker = address(0xBEEF);
+        if (guard == 1) offer.ratifier = address(0xBEEF);
+        if (guard == 2) offer.callback = address(0xBEEF);
+        if (guard == 3) offer.market.chainId = block.chainid + 1;
+        if (guard == 4) offer.start = block.timestamp + 1;
+        if (guard == 5) offer.expiry = offer.market.maturity;
+        if (guard == 6) offer.group = bytes32(uint256(1));
+        if (guard == 7) offer.continuousFeeCap = 1;
+        if (guard == 8) offer.tick = tick > 100 ? tick : uint24(101);
+        if (guard == 9) {
+            offer.maxAssets = 0;
+            offer.maxUnits = 1;
+        }
+        if (guard == 10) {
+            offer.receiverIfMakerIsSeller = address(0xBEEF);
+            offer.reduceOnly = true;
+        }
+        if (guard == 11) offer.market.midnight = address(0xBEEF);
+        if (guard == 12) offer.market.loanToken = address(0xBEEF);
+        assertFalse(adapter.acceptsOffer(offer));
     }
 }

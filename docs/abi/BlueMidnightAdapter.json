@@ -126,6 +126,11 @@
   },
   {
     "inputs": [],
+    "name": "DivisionByZero",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "ExitLossExceeded",
     "type": "error"
   },

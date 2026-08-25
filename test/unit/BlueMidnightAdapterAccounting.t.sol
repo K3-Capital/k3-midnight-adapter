@@ -390,6 +390,9 @@ contract BlueMidnightAdapterAccountingTest is Test {
         midnight.setPosition(midnightId, 70, 0);
         midnight.setPosition(IdLib.toId(midnightMarket), 70, 0);
         assertLt(adapter.realAssets(), initialNav);
+        uint256 impairedNav = adapter.realAssets();
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 0, 10, 0);
+        assertEq(adapter.realAssets(), impairedNav);
 
         token.mint(address(midnight), 20);
         midnight.setPosition(midnightId, 70, 0);
@@ -398,12 +401,22 @@ contract BlueMidnightAdapterAccountingTest is Test {
         assertEq(adapter.accounting().trackedCredit, 50);
 
         midnight.takeMakerSell(adapter, midnightId, midnightMarket, 45, 50, 0);
-        uint256 impairedNav = adapter.realAssets();
-        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 10, 10, 0);
-        assertLe(adapter.realAssets(), impairedNav + 10);
+        assertEq(adapter.accounting().trackedCredit, 0);
     }
 
     function testPendingFeeRoundingAndCheckedNarrowing() public {
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 101, 100, 3);
+        midnight.takeMakerSell(adapter, midnightId, midnightMarket, 33, 33, 1);
+        MarketAccounting memory rounded = adapter.accounting();
+        assertEq(rounded.bookValue, 68); // floor(101 * 67 / 100)
+        assertEq(rounded.netMaturityClaim, 69); // protocol claim caps floor(104 * 67 / 100)
+        assertEq(rounded.trackedCredit, 67);
+
+        setUp();
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 0, 1, 0);
+        midnight.invokeBuy(adapter, midnightId, midnightMarket, 0, 0, type(uint128).max - 1, address(adapter), "");
+
+        setUp();
         midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 0);
         vm.expectRevert(BlueMidnightAdapter.AccountingOverflow.selector);
         midnight.invokeBuy(adapter, midnightId, midnightMarket, 0, 0, type(uint128).max, address(adapter), "");

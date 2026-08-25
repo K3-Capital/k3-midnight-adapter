@@ -21,6 +21,8 @@ import {MAX_TICK} from "midnight/libraries/TickLib.sol";
 import {IdLib} from "midnight/libraries/IdLib.sol";
 import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
 import {RiskIdLib} from "./libraries/RiskIdLib.sol";
+import {AccountingLib} from "./libraries/AccountingLib.sol";
+import {OfferPolicyLib} from "./libraries/OfferPolicyLib.sol";
 
 /// @title Blue Midnight adapter core
 /// @notice The Stage 3, single-market productive sleeve for a Vault V2 adapter.
@@ -456,8 +458,8 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             return false;
         }
         if (
-            offer.market.midnight != midnight || offer.market.chainId != block.chainid
-                || offer.market.loanToken != asset
+            offer.market.chainId != block.chainid
+                || !OfferPolicyLib.isExactMarket(offer, pinnedMidnightMarketHash, midnight, asset)
         ) return false;
         bytes32 marketId = HashLib.hashMarket(offer.market);
         bytes32 protocolMarketId = IdLib.toId(offer.market);
@@ -571,11 +573,12 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         MarketAccounting storage a = accountingState;
         if (units > a.trackedCredit || a.trackedCredit == 0) revert InsufficientCredit();
         uint256 oldBook = a.bookValue;
-        uint256 reduction = oldBook * units / a.trackedCredit;
+        uint256 reduction = AccountingLib.proportionalDown(oldBook, units, a.trackedCredit);
         a.bookValue = _toUint128(uint256(a.bookValue) - reduction);
         if (safeExitInProgress) safeExitLastRemovedBook = reduction;
-        a.netMaturityClaim =
-            _toUint128(uint256(a.netMaturityClaim) - uint256(a.netMaturityClaim) * units / a.trackedCredit);
+        a.netMaturityClaim = _toUint128(
+            uint256(a.netMaturityClaim) - AccountingLib.proportionalDown(a.netMaturityClaim, units, a.trackedCredit)
+        );
         a.trackedCredit = _toUint128(uint256(a.trackedCredit) - units);
         // Midnight has already reduced seller credit and pending fee. The proportional reduction above applies
         // the sale once; only a stricter post-sale protocol claim may reduce the remaining claim further.
@@ -638,8 +641,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         MarketAccounting storage a = accountingState;
         if (units > a.trackedCredit || a.trackedCredit == 0) revert InsufficientCredit();
         uint256 oldCredit = a.trackedCredit;
-        a.bookValue = _toUint128(uint256(a.bookValue) * (oldCredit - units) / oldCredit);
-        a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) * (oldCredit - units) / oldCredit);
+        a.bookValue = _toUint128(AccountingLib.proportionalDown(a.bookValue, oldCredit - units, oldCredit));
+        a.netMaturityClaim =
+            _toUint128(AccountingLib.proportionalDown(a.netMaturityClaim, oldCredit - units, oldCredit));
         a.trackedCredit = _toUint128(oldCredit - units);
         if (a.trackedCredit == 0) {
             a.active = false;

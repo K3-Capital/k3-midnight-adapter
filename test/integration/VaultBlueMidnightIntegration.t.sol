@@ -322,6 +322,35 @@ contract VaultBlueMidnightIntegrationTest is Test {
         assertTrue(predicted != address(0));
     }
 
+    function testVaultDepositWithdrawShareFairnessAroundFillAndRealization() public {
+        vm.prank(depositor);
+        uint256 shares = vault.deposit(ASSETS, depositor);
+        vm.prank(allocator);
+        vault.allocate(address(adapter), abi.encode(blueMarket), ASSETS);
+        uint256 priceBeforeFill = vault.convertToAssets(shares);
+        assertEq(priceBeforeFill, ASSETS);
+
+        Offer memory buy = _buyOffer();
+        bytes memory buyData = _approveOffer(buy);
+        vm.prank(borrower);
+        midnight.take(buy, buyData, UNITS, borrower, borrower, address(0), hex"");
+        assertEq(vault.convertToAssets(shares), priceBeforeFill);
+
+        vm.prank(borrower);
+        token.approve(address(midnight), type(uint256).max);
+        vm.prank(borrower);
+        midnight.repay(midnightMarket, UNITS, borrower, address(0), hex"");
+        adapter.collectRepayments(UNITS);
+        assertEq(vault.convertToAssets(shares), priceBeforeFill);
+
+        vm.prank(allocator);
+        vault.deallocate(address(adapter), abi.encode(blueMarket), ASSETS);
+        vm.prank(depositor);
+        uint256 withdrawn = vault.redeem(shares, depositor, depositor);
+        assertEq(withdrawn, ASSETS);
+        assertEq(vault.totalSupply(), 0);
+    }
+
     function testOtherwiseIdenticalOtherMarketIsRejected() public view {
         Offer memory offer = _buyOffer();
         offer.market.maturity += 1;

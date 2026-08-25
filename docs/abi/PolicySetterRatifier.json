@@ -1,0 +1,368 @@
+[
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "midnight",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidPolicyProvider",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidProof",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "LeafIndexOutOfRange",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MalformedRatifierData",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OfferRejected",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PolicyEpochUnset",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "RootNotApproved",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "UnauthorizedCaller",
+    "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "maker",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "root",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "epoch",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "approved",
+        "type": "bool"
+      }
+    ],
+    "name": "RootApprovalUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "caller",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "maker",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "root",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "newIsRootRatified",
+        "type": "bool"
+      }
+    ],
+    "name": "SetIsRootRatified",
+    "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "MIDNIGHT",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "maker",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "root",
+        "type": "bytes32"
+      }
+    ],
+    "name": "approvedAtEpoch",
+    "outputs": [
+      {
+        "internalType": "uint64",
+        "name": "epoch",
+        "type": "uint64"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "components": [
+              {
+                "internalType": "uint256",
+                "name": "chainId",
+                "type": "uint256"
+              },
+              {
+                "internalType": "address",
+                "name": "midnight",
+                "type": "address"
+              },
+              {
+                "internalType": "address",
+                "name": "loanToken",
+                "type": "address"
+              },
+              {
+                "components": [
+                  {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "lltv",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "liquidationCursor",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "address",
+                    "name": "oracle",
+                    "type": "address"
+                  }
+                ],
+                "internalType": "struct CollateralParams[]",
+                "name": "collateralParams",
+                "type": "tuple[]"
+              },
+              {
+                "internalType": "uint256",
+                "name": "maturity",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "rcfThreshold",
+                "type": "uint256"
+              },
+              {
+                "internalType": "address",
+                "name": "enterGate",
+                "type": "address"
+              },
+              {
+                "internalType": "address",
+                "name": "liquidatorGate",
+                "type": "address"
+              }
+            ],
+            "internalType": "struct Market",
+            "name": "market",
+            "type": "tuple"
+          },
+          {
+            "internalType": "bool",
+            "name": "buy",
+            "type": "bool"
+          },
+          {
+            "internalType": "address",
+            "name": "maker",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "start",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "expiry",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "tick",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "group",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "address",
+            "name": "callback",
+            "type": "address"
+          },
+          {
+            "internalType": "bytes",
+            "name": "callbackData",
+            "type": "bytes"
+          },
+          {
+            "internalType": "address",
+            "name": "receiverIfMakerIsSeller",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "ratifier",
+            "type": "address"
+          },
+          {
+            "internalType": "bool",
+            "name": "reduceOnly",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint128",
+            "name": "maxUnits",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint128",
+            "name": "maxAssets",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint256",
+            "name": "continuousFeeCap",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct Offer",
+        "name": "offer",
+        "type": "tuple"
+      },
+      {
+        "internalType": "bytes",
+        "name": "ratifierData",
+        "type": "bytes"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "isRatified",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "maker",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "root",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bool",
+        "name": "approved",
+        "type": "bool"
+      }
+    ],
+    "name": "setIsRootRatified",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "maker",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "root",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bool",
+        "name": "approved",
+        "type": "bool"
+      }
+    ],
+    "name": "setRoot",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "lib/forge-std": {
+    "rev": "680ee6692649dcc7c617e05b2144932618264a83"
+  },
+  "lib/midnight": {
+    "rev": "709dab354d8f03e64effc2a3dcdd08f5013a0758"
+  },
+  "lib/morpho-blue": {
+    "rev": "d09dd1c4b9c7d9d05f976faa7ebfdc424dae5e8c"
+  },
+  "lib/vault-v2": {
+    "rev": "bec4dd8c847525efea95e106b38a70eaabeef65f"
+  }
+}

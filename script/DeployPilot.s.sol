@@ -36,6 +36,58 @@ contract DeployPilot is Script {
         vm.stopBroadcast();
 
         BlueMidnightAdapter deployed = BlueMidnightAdapter(adapter);
+        _verifyDeployment(
+            deployed,
+            parentVault,
+            blueMarket,
+            midnight,
+            morphoBlue,
+            ratifier,
+            pinnedMidnightMarket,
+            policy,
+            quoter,
+            expectedCodeHash
+        );
+    }
+
+    function verifyDeployment(
+        BlueMidnightAdapter deployed,
+        address parentVault,
+        MarketParams memory blueMarket,
+        address midnight,
+        address morphoBlue,
+        address ratifier,
+        Market memory pinnedMidnightMarket,
+        MarketEconomicPolicy memory policy,
+        address quoter,
+        bytes32 expectedCodeHash
+    ) external view {
+        _verifyDeployment(
+            deployed,
+            parentVault,
+            blueMarket,
+            midnight,
+            morphoBlue,
+            ratifier,
+            pinnedMidnightMarket,
+            policy,
+            quoter,
+            expectedCodeHash
+        );
+    }
+
+    function _verifyDeployment(
+        BlueMidnightAdapter deployed,
+        address parentVault,
+        MarketParams memory blueMarket,
+        address midnight,
+        address morphoBlue,
+        address ratifier,
+        Market memory pinnedMidnightMarket,
+        MarketEconomicPolicy memory policy,
+        address quoter,
+        bytes32 expectedCodeHash
+    ) internal view {
         require(deployed.parentVault() == parentVault, "parent vault mismatch");
         require(deployed.asset() == IVaultV2(parentVault).asset(), "asset mismatch");
         require(deployed.midnight() == midnight, "midnight mismatch");
@@ -45,7 +97,7 @@ contract DeployPilot is Script {
         _verifyBlueMarket(deployed, blueMarket);
         _verifyMidnightMarket(deployed, pinnedMidnightMarket);
         _verifyPolicy(deployed.marketEconomicPolicy(), policy);
-        require(adapter.codehash == expectedCodeHash, "runtime code hash mismatch");
+        require(address(deployed).codehash == expectedCodeHash, "runtime code hash mismatch");
     }
 
     function _verifyBlueMarket(BlueMidnightAdapter deployed, MarketParams memory expected) internal view {

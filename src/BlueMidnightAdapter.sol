@@ -92,8 +92,8 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             _parentVault == address(0) || _midnight == address(0) || _morphoBlue == address(0)
                 || _market.midnight != _midnight || _market.loanToken == address(0)
                 || _market.loanToken != IVaultV2(_parentVault).asset()
-                || _blueMarket.loanToken != IVaultV2(_parentVault).asset() || _blueMarket.oracle == address(0)
-                || _blueMarket.irm == address(0) || _ratifier == address(0) || _approvedQuoter == address(0)
+                || _blueMarket.loanToken != IVaultV2(_parentVault).asset() || _blueMarket.irm == address(0)
+                || _ratifier == address(0) || _approvedQuoter == address(0)
         ) revert InvalidValue();
         parentVault = _parentVault;
         midnight = _midnight;

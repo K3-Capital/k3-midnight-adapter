@@ -254,24 +254,9 @@ contract VaultBlueMidnightIntegrationTest is Test {
         vm.prank(borrower);
         token.approve(address(midnight), type(uint256).max);
         vm.prank(borrower);
-        midnight.repay(midnightMarket, PARTIAL_UNITS, borrower, address(0), hex"");
-        adapter.collectRepayment(PARTIAL_UNITS);
-        assertEq(adapter.accounting().trackedCredit, UNITS - PARTIAL_UNITS);
-
-        uint256 remainingUnits = adapter.accounting().trackedCredit;
-        Offer memory sell = _sellOffer(remainingUnits);
-        bytes memory sellData = _approveOffer(sell);
-        token.mint(lender, UNITS);
-        vm.prank(lender);
-        token.approve(address(midnight), type(uint256).max);
-        vm.prank(lender);
-        midnight.take(sell, sellData, remainingUnits, lender, address(0), address(0), hex"");
+        midnight.repay(midnightMarket, UNITS, borrower, address(0), hex"");
+        adapter.collectRepayment(UNITS);
         assertEq(adapter.accounting().trackedCredit, 0);
-
-        vm.prank(borrower);
-        midnight.repay(midnightMarket, remainingUnits, borrower, address(0), hex"");
-        vm.prank(lender);
-        midnight.withdraw(midnightMarket, remainingUnits, lender, lender);
         assertEq(midnight.withdrawable(midnightProtocolId), 0);
 
         uint256 before = token.balanceOf(depositor);
@@ -312,6 +297,35 @@ contract VaultBlueMidnightIntegrationTest is Test {
         uint256 withdrawn = vault.redeem(shares, depositor, depositor);
         assertEq(withdrawn, ASSETS);
         assertEq(vault.totalSupply(), 0);
+    }
+
+    function testRevokedQuoterRecoveryUsesRealRatifierAndMidnight() public {
+        vm.prank(depositor);
+        vault.deposit(ASSETS, depositor);
+        vm.prank(allocator);
+        vault.allocate(address(adapter), abi.encode(blueMarket), ASSETS);
+
+        Offer memory buy = _buyOffer();
+        bytes memory buyData = _approveOffer(buy);
+        vm.prank(borrower);
+        midnight.take(buy, buyData, UNITS, borrower, borrower, address(0), hex"");
+        assertEq(adapter.accounting().trackedCredit, UNITS);
+
+        _vaultCall(abi.encodeCall(vault.setIsSentinel, (address(this), true)));
+        adapter.revokeQuoter(address(this));
+        assertTrue(adapter.riskOffActive());
+
+        Offer memory sell = _sellOffer(UNITS);
+        bytes32 root = HashLib.hashOffer(sell);
+        adapter.approveRecoveryRoot(root);
+        bytes memory recoveryData = abi.encode(root, uint256(0), new bytes32[](0));
+
+        token.mint(lender, UNITS);
+        vm.prank(lender);
+        token.approve(address(midnight), type(uint256).max);
+        vm.prank(lender);
+        midnight.take(sell, recoveryData, UNITS, lender, address(0), address(0), hex"");
+        assertEq(adapter.accounting().trackedCredit, 0);
     }
 
     function testOtherwiseIdenticalOtherMarketIsRejected() public view {

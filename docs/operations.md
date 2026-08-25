@@ -106,10 +106,10 @@ accepted change increments the policy epoch and invalidates prior roots. The
 sentinel's `pauseNewExposure` is monotonic: it stops new buys, approvals, and
 allocation while preserving exits and recovery.
 
-The current build reports 16,882 runtime bytes and 20,734 creation bytes. The
-runtime delta versus the approved Stage 3 measurement (18,991 bytes) is -2,109
+The current build reports 16,940 runtime bytes and 20,799 creation bytes. The
+runtime delta versus the approved Stage 3 measurement (18,991 bytes) is -2,051
 bytes. `runtime_bytes * 200` is only the EVM runtime code-deposit component
-(3,798,200 gas). The reproducible local direct-CREATE fixture is:
+(3,388,000 gas). The reproducible local direct-CREATE fixture is:
 
 ```sh
 forge test --match-path test/unit/DeployPilot.t.sol \
@@ -131,15 +131,17 @@ quoter, and Midnight market. Vault V2 governance must:
 3. Exercise allocation, callback, repayment, asynchronous maker-sell, and exact
    deallocation paths on the deterministic local deployment.
 
-The sentinel may only tighten policy for the pinned market, revoke the approved
-quoter, bump the risk-off epoch, and lower limits. Repayment collection remains
-available during risk-off.
+The curator may change policy in either direction for the pinned market, while the
+sentinel may permanently pause new exposure. The root approver may revoke roots
+even after pause; recovery-root approval is restricted to the curator or sentinel.
+Repayment collection remains available during the exposure pause.
 
 ## Monitoring
 
 Alert on:
 
-- `PolicyEpochIncremented`, `QuoterRevoked`, `MarketEconomicPolicyTightened`, and risk-off events;
+- `PolicyEpochIncremented`, `RootApproverRevoked`, `MaxBuyTickUpdated`,
+  `MinSellTickUpdated`, `MaxExpiryHorizonUpdated`, and `NewExposurePaused` events;
 - Blue liquidity and adapter supply assets;
 - the parent Vault adapter allocation/cap;
 - book value, maturity claims, recognized losses, and realized P&L;

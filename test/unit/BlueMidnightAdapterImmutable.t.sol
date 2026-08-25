@@ -97,14 +97,45 @@ contract BlueMidnightAdapterImmutableTest is Test {
 
     function testQuoterRevocationEnablesSentinelRecoveryRootButNotBuys() public {
         bytes32 root = keccak256("recovery-root");
+        vm.prank(QUOTER);
+        adapter.approveRoot(root);
         vault.setSentinel(address(this), true);
         adapter.pauseNewExposure(bytes32("pause"));
         assertTrue(adapter.newExposurePaused());
         vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
         adapter.approveRoot(root);
+        vm.prank(QUOTER);
+        adapter.revokeRoot(root);
+        assertFalse(ratifier.approved(address(adapter), root));
         adapter.approveRecoveryRoot(root);
         assertTrue(ratifier.approved(address(adapter), root));
         assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 0);
+    }
+
+    function testCuratorOnlyPolicySettersAllowBothDirectionsAndEpochInvalidation() public {
+        uint64 epoch = adapter.policyEpoch();
+
+        vm.prank(QUOTER);
+        vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
+        adapter.setMaxBuyTick(99);
+
+        adapter.setMaxBuyTick(99);
+        assertEq(adapter.policyEpoch(), ++epoch);
+        adapter.setMaxBuyTick(100);
+        assertEq(adapter.policyEpoch(), ++epoch);
+        adapter.setMinSellTick(2);
+        assertEq(adapter.policyEpoch(), ++epoch);
+        adapter.setMinSellTick(1);
+        assertEq(adapter.policyEpoch(), ++epoch);
+        adapter.setMaxExpiryHorizon(10 days);
+        assertEq(adapter.policyEpoch(), ++epoch);
+        adapter.setMaxExpiryHorizon(20 days);
+        assertEq(adapter.policyEpoch(), ++epoch);
+
+        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
+        adapter.setMaxExpiryHorizon(0);
+        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
+        adapter.setMinSellTick(type(uint24).max);
     }
 
     function testRiskOffRecoveryRootCannotBeApprovedBeforeEmergency() public {

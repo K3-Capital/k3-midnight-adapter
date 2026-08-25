@@ -28,7 +28,7 @@ class ReleaseGateEnvironmentTest(unittest.TestCase):
             ["python3", str(GATE)], cwd=ROOT, env=env, check=True, capture_output=True, text=True
         )
         self.assertIn("optimizer=true, runs=200, via_ir=true, evm=osaka", result.stdout)
-        self.assertIn("BlueMidnightAdapter: runtime=18991 creation=23307", result.stdout)
+        self.assertIn("BlueMidnightAdapter: runtime=16940 creation=20799", result.stdout)
         self.assertIn("PolicySetterRatifier: runtime=4229 creation=4362", result.stdout)
 
 

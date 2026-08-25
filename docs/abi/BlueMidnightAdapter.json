@@ -962,11 +962,11 @@
     "inputs": [
       {
         "internalType": "address",
-        "name": "quoter",
+        "name": "account",
         "type": "address"
       }
     ],
-    "name": "isQuoter",
+    "name": "isRootApprover",
     "outputs": [
       {
         "internalType": "bool",

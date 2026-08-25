@@ -135,19 +135,19 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         _;
     }
 
-    function isQuoter(address quoter) public view returns (bool) {
-        return quoter == rootApprover && !newExposurePaused;
+    function isRootApprover(address account) public view returns (bool) {
+        return account == rootApprover && !newExposurePaused;
     }
 
     function approveRoot(bytes32 root) external {
-        if (!isQuoter(msg.sender) || root == bytes32(0)) revert Unauthorized();
+        if (!isRootApprover(msg.sender) || root == bytes32(0)) revert Unauthorized();
         (bool success,) =
             ratifier.call(abi.encodeWithSignature("setRoot(address,bytes32,bool)", address(this), root, true));
         if (!success) revert InvalidCallback();
     }
 
     /// @notice Approves a root for reduce-only recovery after emergency invalidation.
-    /// @dev Sentinel approval cannot reopen buys: risk-off is latched and acceptsOffer
+    /// @dev Sentinel approval cannot reopen buys: the exposure pause is latched and acceptsOffer
     /// still applies the reduce-only predicate before the ratifier can accept a leaf.
     function approveRecoveryRoot(bytes32 root) external onlyCuratorOrSentinel {
         if (root == bytes32(0) || !newExposurePaused) revert InvalidValue();
@@ -158,29 +158,29 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     }
 
     function revokeRoot(bytes32 root) external {
-        if (!isQuoter(msg.sender) || root == bytes32(0)) revert Unauthorized();
+        if (msg.sender != rootApprover || root == bytes32(0)) revert Unauthorized();
         (bool success,) =
             ratifier.call(abi.encodeWithSignature("setRoot(address,bytes32,bool)", address(this), root, false));
         if (!success) revert InvalidCallback();
     }
 
-    /// @notice Allows the curator or sentinel to immediately make a configured market strictly safer.
+    /// @notice Allows the curator to change a configured market policy value.
     function setMaxBuyTick(uint24 value) external onlyCurator {
-        if (value > MAX_TICK || value >= economicPolicy.maxBuyTick) revert InvalidValue();
+        if (value > MAX_TICK || value == economicPolicy.maxBuyTick) revert InvalidValue();
         economicPolicy.maxBuyTick = value;
         _bumpEpoch("max-buy-tick");
         emit MaxBuyTickUpdated(value, policyEpoch);
     }
 
     function setMinSellTick(uint24 value) external onlyCurator {
-        if (value > MAX_TICK || value <= economicPolicy.minSellTick) revert InvalidValue();
+        if (value > MAX_TICK || value == economicPolicy.minSellTick) revert InvalidValue();
         economicPolicy.minSellTick = value;
         _bumpEpoch("min-sell-tick");
         emit MinSellTickUpdated(value, policyEpoch);
     }
 
     function setMaxExpiryHorizon(uint40 value) external onlyCurator {
-        if (value == 0 || value >= economicPolicy.maxExpiryHorizon) revert InvalidValue();
+        if (value == 0 || value == economicPolicy.maxExpiryHorizon) revert InvalidValue();
         economicPolicy.maxExpiryHorizon = value;
         _bumpEpoch("max-expiry-horizon");
         emit MaxExpiryHorizonUpdated(value, policyEpoch);
@@ -239,7 +239,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     }
 
     /// @notice Permissionless collection of available Midnight repayments.
-    /// @dev This path is intentionally available while risk-off is active.
+    /// @dev This path is intentionally available while the exposure pause is active.
     function collectRepayment(uint256 requestedUnits) external returns (uint256 totalAssets) {
         if (HashLib.hashMarket(_pinnedMidnightMarket) != pinnedMidnightMarketHash) revert InvalidMarket();
         _checkpoint(pinnedMidnightMarketHash, _pinnedMidnightMarket, 0, 0);
@@ -371,7 +371,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             revert InvalidOffer();
         }
         _checkpoint(marketId, market, 0, 0);
-        if (newExposurePaused) revert ExposureExceeded();
+        if (newExposurePaused || buyerAssets > buyerAssetsBound(marketId)) revert ExposureExceeded();
         // The adapter has exactly one configured Blue route. Empty data is pinned so the offer cannot carry an
         // alternate routing payload that might diverge from the policy predicate.
         if (data.length != 0) revert InvalidCallback();

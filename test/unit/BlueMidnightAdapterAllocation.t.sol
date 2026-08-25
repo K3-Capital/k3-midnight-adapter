@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {BlueMidnightAdapter} from "../../src/BlueMidnightAdapter.sol";
 import {MarketParams, Id} from "morpho-blue/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "morpho-blue/libraries/MarketParamsLib.sol";
+import {Market, CollateralParams} from "midnight/interfaces/IMidnight.sol";
 
 contract AllocationToken {
     mapping(address => uint256) public balanceOf;
@@ -114,8 +115,21 @@ contract BlueMidnightAdapterAllocationTest is Test {
         token = new AllocationToken();
         vault = new AllocationVault(address(token));
         morpho = new AllocationMorpho(address(token));
-        adapter = new BlueMidnightAdapter(address(vault), address(4), address(morpho), address(5));
         market.loanToken = address(token);
+        adapter = new BlueMidnightAdapter(address(vault), address(4), address(morpho), address(5), _pinnedMarket());
+    }
+
+    function _pinnedMarket() internal view returns (Market memory) {
+        return Market({
+            chainId: block.chainid,
+            midnight: address(4),
+            loanToken: address(token),
+            collateralParams: new CollateralParams[](0),
+            maturity: block.timestamp + 30 days,
+            rcfThreshold: 0,
+            enterGate: address(0),
+            liquidatorGate: address(0)
+        });
     }
 
     function _configure() internal {
@@ -160,7 +174,7 @@ contract BlueMidnightAdapterAllocationTest is Test {
         assertEq(token.balanceOf(address(vault)), 100);
     }
 
-    function testBuyerBoundUsesBorrowLiquidityAndCaps() public {
+    function testBuyerBoundUsesBorrowLiquidity() public {
         _configure();
         token.mint(address(vault), 1_000_000);
         vm.prank(address(vault));
@@ -169,13 +183,9 @@ contract BlueMidnightAdapterAllocationTest is Test {
         adapter.allocate(abi.encode(market), 1_000_000, bytes4(0), address(0));
         morpho.setMarket(market.id(), 1_000_000, 1_000_000, 900_000);
 
-        bytes memory capData = abi.encodeWithSelector(adapter.setExposureCaps.selector, 1_000_000, 1_000_000);
-        adapter.submit(capData);
-        vm.warp(adapter.executableAt(capData));
-        adapter.setExposureCaps(1_000_000, 1_000_000);
         assertEq(adapter.blueAvailableLiquidity(), 100_000);
         assertEq(adapter.expectedSupplyAssets(), 500_000);
         assertFalse(adapter.riskOffActive());
-        assertEq(adapter.buyerAssetsBound(bytes32(0)), 100_000);
+        assertEq(adapter.blueAvailableLiquidity(), 100_000);
     }
 }

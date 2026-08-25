@@ -8,6 +8,7 @@ import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
 import {Market, CollateralParams, Offer} from "midnight/interfaces/IMidnight.sol";
 import {ExitToken, ExitVault, ExitMorpho, ExitMidnight} from "../unit/BlueMidnightAdapterExit.t.sol";
 import {MarketEconomicPolicy} from "../../src/types/AdapterTypes.sol";
+import {AdapterTestMarket} from "../utils/AdapterTestMarket.sol";
 
 /// @notice Stateful caller harness for the Stage 6 adapter boundary.
 /// @dev Every target method uses the same valid market and impersonates the caller
@@ -74,7 +75,7 @@ contract Stage6AdapterHandler is Test {
         if (units == 0) return;
         token.mint(address(midnight), units);
         midnight.seed(midnightMarket, credit, units, 0);
-        adapter.collectRepayments(_markets(midnightMarket), _units(units));
+        adapter.collectRepayments(units);
     }
 
     function sell(uint256 requested) external {
@@ -140,7 +141,7 @@ contract Stage6HandlerInvariantTest is Test {
         vault = new ExitVault(address(token));
         morpho = new ExitMorpho(address(token));
         midnight = new ExitMidnight(address(token));
-        adapter = new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(5));
+        adapter = new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(5), AdapterTestMarket.make(address(midnight), address(token)));
         blueMarket = MarketParams(address(token), address(1), address(2), address(3), 0);
         _execute(abi.encodeWithSelector(adapter.setBlueMarket.selector, blueMarket));
 
@@ -154,10 +155,8 @@ contract Stage6HandlerInvariantTest is Test {
             enterGate: address(0),
             liquidatorGate: address(0)
         });
-        midnightMarketId = HashLib.hashMarket(midnightMarket);
-        _execute(abi.encodeWithSelector(adapter.setMarketEconomicPolicy.selector, midnightMarketId, _policy()));
-        _execute(abi.encodeWithSelector(adapter.setMarketPolicy.selector, midnightMarketId, 1_000_000, 1_000_000, true));
-        _execute(abi.encodeWithSelector(adapter.setExposureCaps.selector, 1_000_000, 1_000_000));
+        midnightMarketId = adapter.pinnedMidnightMarketId();
+        _execute(abi.encodeWithSelector(adapter.setMarketEconomicPolicy.selector, _policy()));
 
         handler = new Stage6AdapterHandler(token, vault, morpho, midnight, adapter, blueMarket, midnightMarket);
         targetContract(address(handler));

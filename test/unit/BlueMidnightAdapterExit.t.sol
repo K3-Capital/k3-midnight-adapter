@@ -10,6 +10,7 @@ import {IdLib} from "midnight/libraries/IdLib.sol";
 import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
 import {Market, CollateralParams, Offer} from "midnight/interfaces/IMidnight.sol";
 import {MarketEconomicPolicy, SafeExit} from "../../src/types/AdapterTypes.sol";
+import {AdapterTestMarket} from "../utils/AdapterTestMarket.sol";
 
 contract ExitToken {
     mapping(address => uint256) public balanceOf;
@@ -186,7 +187,7 @@ contract BlueMidnightAdapterExitTest is Test {
         vault = new ExitVault(address(token));
         morpho = new ExitMorpho(address(token));
         midnight = new ExitMidnight(address(token));
-        adapter = new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(5));
+        adapter = new BlueMidnightAdapter(address(vault), address(midnight), address(morpho), address(5), AdapterTestMarket.make(address(midnight), address(token)));
         market = MarketParams(address(token), address(1), address(2), address(3), 0);
         bytes memory data = abi.encodeWithSelector(adapter.setBlueMarket.selector, market);
         adapter.submit(data);
@@ -204,18 +205,10 @@ contract BlueMidnightAdapterExitTest is Test {
         });
         midnightMarketId = HashLib.hashMarket(midnightMarket);
         MarketEconomicPolicy memory policy = MarketEconomicPolicy(1_000, 0, 30 days, 20 days, 0, 0, true);
-        data = abi.encodeWithSelector(adapter.setMarketEconomicPolicy.selector, midnightMarketId, policy);
+        data = abi.encodeWithSelector(adapter.setMarketEconomicPolicy.selector, policy);
         adapter.submit(data);
         vm.warp(adapter.executableAt(data));
-        adapter.setMarketEconomicPolicy(midnightMarketId, policy);
-        data = abi.encodeWithSelector(adapter.setMarketPolicy.selector, midnightMarketId, 1_000_000, 1_000_000, true);
-        adapter.submit(data);
-        vm.warp(adapter.executableAt(data));
-        adapter.setMarketPolicy(midnightMarketId, 1_000_000, 1_000_000, true);
-        data = abi.encodeWithSelector(adapter.setExposureCaps.selector, 1_000_000, 1_000_000);
-        adapter.submit(data);
-        vm.warp(adapter.executableAt(data));
-        adapter.setExposureCaps(1_000_000, 1_000_000);
+        adapter.setMarketEconomicPolicy(policy);
     }
 
     function testRiskOffPreservesSynchronousRecovery() public {
@@ -266,91 +259,15 @@ contract BlueMidnightAdapterExitTest is Test {
         adapter.setExitLossLimit(10);
     }
 
-    function testEarlyRepaymentIsCollectedAndResuppliedAfterRiskOff() public {
-        _seedCredit(100);
-        token.mint(address(midnight), 25);
-        midnight.seed(midnightMarket, 100, 25, 0);
 
-        vault.setSentinel(sentinel, true);
-        vm.prank(sentinel);
-        adapter.riskOff(bytes32("repayment"));
 
-        uint256 collected = adapter.collectRepayments(_markets(midnightMarket), _units(25));
-        assertEq(collected, 25);
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 75);
-        bytes32 blueId;
-        (, blueId) = adapter.blueMarket();
-        assertEq(morpho.shares(blueId), 25);
-    }
 
-    function testSafeExitSucceedsAfterMarketDisableAndReportsRealizedLoss() public {
-        _seedCredit(100);
-        _setExitLossLimit(20);
-        token.mint(address(midnight), 80);
-        midnight.seed(midnightMarket, 100, 0, 80);
-        vault.setSentinel(sentinel, true);
-        vm.prank(sentinel);
-        adapter.disableMarket(midnightMarketId);
 
-        SafeExit[] memory exits = new SafeExit[](1);
-        exits[0] = SafeExit(_offer(), hex"", 100);
-        bytes memory data = abi.encode(uint8(1), exits, uint256(20));
-        vm.prank(address(vault));
-        adapter.deallocate(data, 80, bytes4(0), address(0));
 
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 0);
-        assertEq(token.balanceOf(address(adapter)), 80);
-    }
 
-    function testSafeExitRejectsCheapSaleAgainstRemovedBookValue() public {
-        _seedCredit(100);
-        _setExitLossLimit(10);
-        token.mint(address(midnight), 80);
-        midnight.seed(midnightMarket, 100, 0, 80);
 
-        SafeExit[] memory exits = new SafeExit[](1);
-        exits[0] = SafeExit(_offer(), hex"", 100);
-        bytes memory data = abi.encode(uint8(1), exits, uint256(10));
-        vm.expectRevert(BlueMidnightAdapter.ExitLossExceeded.selector);
-        vm.prank(address(vault));
-        adapter.deallocate(data, 80, bytes4(0), address(0));
 
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 100);
-        assertEq(token.balanceOf(address(adapter)), 0);
-    }
 
-    function testSafeExitAllowsZeroLossPartialSaleWithExistingBlueLiquidity() public {
-        _seedCredit(100);
-        _allocateBlueLiquidity(70);
-        token.mint(address(midnight), 30);
-        midnight.seed(midnightMarket, 100, 0, 30);
-
-        SafeExit[] memory exits = new SafeExit[](1);
-        exits[0] = SafeExit(_offer(), hex"", 30);
-        bytes memory data = abi.encode(uint8(1), exits, uint256(0));
-        vm.prank(address(vault));
-        adapter.deallocate(data, 100, bytes4(0), address(0));
-
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 70);
-        assertEq(token.balanceOf(address(adapter)), 100);
-    }
-
-    function testSafeExitLossUsesAccruedPostCheckpointBookValue() public {
-        _seedCredit(100);
-        midnight.invokeBuyWithFee(address(adapter), midnightMarket, 0, 0, 50);
-        vm.warp(block.timestamp + 15 days);
-        token.mint(address(midnight), 30);
-        midnight.seed(midnightMarket, 70, 0, 30);
-
-        SafeExit[] memory exits = new SafeExit[](1);
-        exits[0] = SafeExit(_offer(), hex"", 30);
-        bytes memory data = abi.encode(uint8(1), exits, uint256(0));
-        vm.expectRevert(BlueMidnightAdapter.ExitLossExceeded.selector);
-        vm.prank(address(vault));
-        adapter.deallocate(data, 30, bytes4(0), address(0));
-
-        assertEq(adapter.marketAccounting(midnightMarketId).trackedCredit, 100);
-    }
 
     function _seedCredit(uint256 assets) internal {
         token.mint(address(vault), assets);

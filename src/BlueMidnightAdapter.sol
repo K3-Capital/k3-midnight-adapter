@@ -28,12 +28,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     error Unauthorized();
     error InvalidMarket();
     error LoanAssetMismatch();
-    error DataNotTimelocked();
-    error TimelockNotExpired();
-    error DataAlreadyPending();
-    error TimelockNotIncreasing();
-    error TimelockNotDecreasing();
-    error Abdicated();
+
     error InvalidValue();
 
     error InsufficientLiquidity();
@@ -48,11 +43,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     error AccountingOverflow();
     error RepaymentUnavailable();
 
-    event Submit(bytes4 indexed selector, bytes data, uint256 executableAt);
-    event Accept(bytes4 indexed selector, bytes data);
-    event Revoke(address indexed caller, bytes4 indexed selector, bytes data);
-    event BlueMarketSet(bytes32 indexed marketId, MarketParams market);
-    event QuoterSet(address indexed quoter, bool enabled);
+    event QuoterRevoked(address indexed quoter);
     event PolicyEpochIncremented(uint64 indexed epoch, bytes32 reason);
 
     event Allocate(bytes32 indexed marketId, uint256 assets, uint256 shares);
@@ -60,11 +51,10 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     event BuyFill(bytes32 indexed marketId, uint256 assets, uint256 units, uint256 bookValue);
     event SellFill(bytes32 indexed marketId, uint256 assets, uint256 units, int256 pnl);
 
-    event MarketEconomicPolicySet(bytes32 indexed marketId, MarketEconomicPolicy policy, bool immediate);
+    event MarketEconomicPolicyTightened(bytes32 indexed marketId, uint64 indexed epoch);
     event RepaymentCollected(bytes32 indexed marketId, uint256 units, uint256 assets);
     event MarketDisabledEvent(bytes32 indexed marketId);
 
-    address public immutable factory;
     address public immutable parentVault;
     address public immutable asset;
     address public immutable midnight;
@@ -72,54 +62,54 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     address public immutable ratifier;
     bytes32 public immutable adapterId;
 
-    mapping(bytes4 selector => uint256) public timelock;
-    mapping(bytes4 selector => bool) public abdicated;
-    mapping(bytes data => uint256) public executableAt;
-    mapping(address account => bool) public isQuoter;
-
     BlueMarketConfig internal blue;
-    bool public blueMarketConfigured;
+    bool public immutable blueMarketConfigured;
     uint64 public policyEpoch;
     bool public riskOffActive;
-    bytes4 internal constant DECREASE_TIMELOCK_SELECTOR = bytes4(keccak256("decreaseTimelock(bytes4,uint256)"));
+
     MidnightMarket internal pinnedMidnightMarket;
     bytes32 public immutable pinnedMidnightMarketId;
     bytes32 public immutable pinnedMidnightMarketHash;
     // Exactly one immutable Midnight market is configured, so accounting is scalar.
     MarketAccounting internal accountingState;
     bool public marketEnabled;
-    MarketEconomicPolicy public marketEconomicPolicy;
+    MarketEconomicPolicy internal economicPolicy;
+    address public immutable approvedQuoter;
+    bool public quoterRevoked;
 
     constructor(
         address _parentVault,
+        MarketParams memory _blueMarket,
         address _midnight,
         address _morphoBlue,
         address _ratifier,
-        MidnightMarket memory _pinnedMidnightMarket
+        MidnightMarket memory _pinnedMidnightMarket,
+        MarketEconomicPolicy memory _economicPolicy,
+        address _approvedQuoter
     ) {
         if (
             _parentVault == address(0) || _midnight == address(0) || _morphoBlue == address(0)
                 || _pinnedMidnightMarket.midnight != _midnight || _pinnedMidnightMarket.loanToken == address(0)
                 || _pinnedMidnightMarket.loanToken != IVaultV2(_parentVault).asset()
+                || _blueMarket.loanToken != IVaultV2(_parentVault).asset() || _blueMarket.oracle == address(0)
+                || _blueMarket.irm == address(0) || _ratifier == address(0) || _approvedQuoter == address(0)
         ) revert InvalidValue();
-        factory = msg.sender;
         parentVault = _parentVault;
         midnight = _midnight;
         morphoBlue = _morphoBlue;
         ratifier = _ratifier;
+        blue = BlueMarketConfig({market: _blueMarket, marketId: Id.unwrap(_blueMarket.id())});
+        blueMarketConfigured = true;
         pinnedMidnightMarket = _pinnedMidnightMarket;
         pinnedMidnightMarketId = IdLib.toId(_pinnedMidnightMarket);
         pinnedMidnightMarketHash = HashLib.hashMarket(_pinnedMidnightMarket);
         asset = IVaultV2(_parentVault).asset();
         adapterId = RiskIdLib.adapter(address(this));
+        _validateEconomicPolicy(_economicPolicy);
+        economicPolicy = _economicPolicy;
+        approvedQuoter = _approvedQuoter;
         policyEpoch = 1;
-
-        timelock[bytes4(keccak256("setBlueMarket((address,address,address,address,uint256))"))] = 2 days;
-
-        timelock[bytes4(keccak256("setQuoter(address,bool)"))] = 2 days;
-
-        timelock[bytes4(keccak256("setMarketEconomicPolicy((uint24,uint24,uint40,uint40,uint32,uint64,bool))"))] =
-        2 days;
+        marketEnabled = true;
         SafeERC20Lib.safeApprove(asset, _morphoBlue, type(uint256).max);
         SafeERC20Lib.safeApprove(asset, _parentVault, type(uint256).max);
     }
@@ -146,93 +136,27 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         _;
     }
 
-    function submit(bytes calldata data) external onlyCurator {
-        if (executableAt[data] != 0) revert DataAlreadyPending();
-        bytes4 selector = bytes4(data);
-        uint256 delay = selector == DECREASE_TIMELOCK_SELECTOR ? timelock[bytes4(data[4:8])] : timelock[selector];
-        executableAt[data] = block.timestamp + delay;
-        emit Submit(selector, data, executableAt[data]);
-    }
-
-    function revoke(bytes calldata data) external onlyCuratorOrSentinel {
-        if (executableAt[data] == 0) revert DataNotTimelocked();
-        executableAt[data] = 0;
-        emit Revoke(msg.sender, bytes4(data), data);
-    }
-
-    function _timelocked() internal {
-        bytes4 selector = bytes4(msg.data);
-        uint256 at = executableAt[msg.data];
-        if (at == 0) revert DataNotTimelocked();
-        if (block.timestamp < at) revert TimelockNotExpired();
-        if (abdicated[selector]) revert Abdicated();
-        executableAt[msg.data] = 0;
-        emit Accept(selector, msg.data);
-    }
-
-    function increaseTimelock(bytes4 selector, uint256 duration) external onlyCurator {
-        _timelocked();
-        if (duration < timelock[selector]) revert TimelockNotIncreasing();
-        timelock[selector] = duration;
-    }
-
-    function decreaseTimelock(bytes4 selector, uint256 duration) external onlyCurator {
-        _timelocked();
-        if (duration > timelock[selector]) revert TimelockNotDecreasing();
-        timelock[selector] = duration;
-    }
-
-    function abdicate(bytes4 selector) external onlyCurator {
-        _timelocked();
-        abdicated[selector] = true;
-    }
-
-    function setBlueMarket(MarketParams calldata market) external onlyCurator {
-        _timelocked();
-        if (market.loanToken != asset) revert LoanAssetMismatch();
-        if (blueMarketConfigured && blue.marketId != bytes32(0) && expectedSupplyAssets() != 0) revert InvalidValue();
-        blue = BlueMarketConfig({market: market, marketId: Id.unwrap(market.id())});
-        blueMarketConfigured = true;
-        _bumpEpoch("blue-market");
-        emit BlueMarketSet(blue.marketId, market);
-    }
-
-    function setQuoter(address quoter, bool enabled) external onlyCurator {
-        _timelocked();
-        if (quoter == address(0)) revert InvalidValue();
-        isQuoter[quoter] = enabled;
-        _bumpEpoch(enabled ? bytes32("quoter-add") : bytes32("quoter-remove"));
-        emit QuoterSet(quoter, enabled);
+    function isQuoter(address quoter) public view returns (bool) {
+        return quoter == approvedQuoter && !quoterRevoked;
     }
 
     function approveRoot(bytes32 root) external {
-        if (!isQuoter[msg.sender] || root == bytes32(0)) revert Unauthorized();
+        if (!isQuoter(msg.sender) || root == bytes32(0)) revert Unauthorized();
         (bool success,) =
             ratifier.call(abi.encodeWithSignature("setRoot(address,bytes32,bool)", address(this), root, true));
         if (!success) revert InvalidCallback();
     }
 
     function revokeRoot(bytes32 root) external {
-        if (!isQuoter[msg.sender] || root == bytes32(0)) revert Unauthorized();
+        if (!isQuoter(msg.sender) || root == bytes32(0)) revert Unauthorized();
         (bool success,) =
             ratifier.call(abi.encodeWithSignature("setRoot(address,bytes32,bool)", address(this), root, false));
         if (!success) revert InvalidCallback();
     }
 
-    /// @notice Sets a per-Midnight-market economic policy after the curator timelock.
-    /// @dev This is required for initial configuration and any loosening of economic limits.
-    function setMarketEconomicPolicy(MarketEconomicPolicy calldata policy) external onlyCurator {
-        _timelocked();
-        _validateEconomicPolicy(policy);
-        marketEconomicPolicy = policy;
-        marketEnabled = policy.configured;
-        _bumpEpoch("economic-policy-set");
-        emit MarketEconomicPolicySet(pinnedMidnightMarketId, policy, false);
-    }
-
     /// @notice Allows the curator or sentinel to immediately make a configured market strictly safer.
     function tightenMarketEconomicPolicy(MarketEconomicPolicy calldata policy) external onlyCuratorOrSentinel {
-        MarketEconomicPolicy memory current = marketEconomicPolicy;
+        MarketEconomicPolicy memory current = economicPolicy;
         if (!current.configured) revert InvalidValue();
         _validateEconomicPolicy(policy);
         if (
@@ -247,16 +171,16 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
                 && policy.maxContinuousFeePerSecondWad == current.maxContinuousFeePerSecondWad
                 && policy.maxSettlementFeeWad == current.maxSettlementFeeWad
         ) revert InvalidValue();
-        marketEconomicPolicy = policy;
+        economicPolicy = policy;
         _bumpEpoch("economic-policy-tighten");
-        emit MarketEconomicPolicySet(pinnedMidnightMarketId, policy, true);
+        emit MarketEconomicPolicyTightened(pinnedMidnightMarketId, policyEpoch);
     }
 
     function revokeQuoter(address quoter) external onlySentinel {
-        if (quoter == address(0)) revert InvalidValue();
-        isQuoter[quoter] = false;
+        if (quoter != approvedQuoter) revert InvalidValue();
+        quoterRevoked = true;
         _bumpEpoch("quoter-revoke");
-        emit QuoterSet(quoter, false);
+        emit QuoterRevoked(quoter);
     }
 
     /// @dev Sentinel-only risk-off hook. It cannot expand any bound.
@@ -404,7 +328,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         ) return false;
         bytes32 marketId = HashLib.hashMarket(offer.market);
         bytes32 protocolMarketId = IdLib.toId(offer.market);
-        MarketEconomicPolicy memory policy = marketEconomicPolicy;
+        MarketEconomicPolicy memory policy = economicPolicy;
         if (
             marketId != pinnedMidnightMarketHash || (!marketEnabled && offer.buy) || !marketKnown(marketId)
                 || !policy.configured || offer.start > block.timestamp
@@ -441,7 +365,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             && offer.maxUnits <= accountingState.trackedCredit;
     }
 
-    function _validateEconomicPolicy(MarketEconomicPolicy calldata policy) internal pure {
+    function _validateEconomicPolicy(MarketEconomicPolicy memory policy) internal pure {
         if (
             !policy.configured || policy.maxBuyTick > MAX_TICK || policy.minSellTick > MAX_TICK || policy.maxTenor == 0
                 || policy.maxExpiryHorizon == 0 || policy.maxExpiryHorizon > policy.maxTenor

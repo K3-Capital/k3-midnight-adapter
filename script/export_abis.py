@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ABI_DIR = ROOT / "docs" / "abi"
 CONTRACTS = (
     "BlueMidnightAdapter",
-    "BlueMidnightAdapterFactory",
+
     "PolicySetterRatifier",
 )
 OPERATOR_VIEWS: dict[str, tuple[str, ...]] = {

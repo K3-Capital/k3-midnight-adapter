@@ -1,7 +1,7 @@
 # Operations
 
-This repository produces immutable `BlueMidnightAdapter` instances. Stage 6 adds a
-permissionless CREATE2 factory and operator-facing deployment workflow.
+This repository produces immutable `BlueMidnightAdapter` instances. Each instance
+is deployed directly by an operator from a fully reviewed constructor configuration.
 
 **Release gate: mainnet deployment is blocked pending a formal independent
 external audit, remediation or disposition of its findings, and explicit written
@@ -19,8 +19,7 @@ python3 script/export_abis.py --write  # only when intentionally refreshing arti
 python3 script/export_abis.py --check
 ```
 
-The checked artifacts cover `BlueMidnightAdapter`,
-`BlueMidnightAdapterFactory`, and `PolicySetterRatifier`, including their
+The checked artifacts cover `BlueMidnightAdapter` and `PolicySetterRatifier`, including their
 events/errors. `docs/abi/operator-views.json` records the required operator
 views: `realAssets`, `expectedSupplyAssets`, `blueAvailableLiquidity`,
 `buyerAssetsBound`, `accounting`, `pinnedMidnightMarketId`, and
@@ -57,40 +56,43 @@ sequence; do not commit `out/`, `out-pinned/`, or compiler caches.
 3. Confirm the Vault V2 asset is the same token used by the approved Blue market
    and the one immutable Midnight market. The parent Vault adapter cap is the
    sole concentration boundary; the adapter has no internal exposure cap.
-4. Deploy `BlueMidnightAdapterFactory` with `script/DeployFactory.s.sol`.
-5. Record the factory address and transaction hash in the change record. Do not
-   commit broadcast directories or deployment state.
+4. Encode the exact Blue market, Midnight market, economic policy, and approved
+   quoter identity; record the expected runtime code hash.
+5. Deploy directly with `script/DeployPilot.s.sol`. Do not commit broadcast
+   directories or deployment state.
 
 ## Deterministic pilot deployment
 
-Use a non-zero, change-controlled `ADAPTER_SALT`. The factory prediction includes
-all constructor arguments in the CREATE2 init code, so reusing a salt with a
-different configuration yields a different address.
+The deployment is intentionally nondeterministic unless an established audited
+CREATE2 deployer is selected outside this repository. No custom factory or
+embedded creation bytecode is used.
 
 ```bash
-export ADAPTER_FACTORY=0x...
-export ADAPTER_SALT=0x...
 export PARENT_VAULT=0x...
+export BLUE_MARKET=0x...
 export MIDNIGHT=0x...
 export MORPHO_BLUE=0x...
 export RATIFIER=0x...
+export MIDNIGHT_MARKET=0x...
+export ECONOMIC_POLICY=0x...
+export APPROVED_QUOTER=0x...
+export EXPECTED_RUNTIME_CODE_HASH=0x...
 forge script script/DeployPilot.s.sol --rpc-url "$RPC_URL" --broadcast
 ```
 
-Verify the emitted `AdapterDeployed` event and query the adapter's immutable
-`parentVault`, `asset`, `midnight`, `morphoBlue`, `ratifier`, and `factory`
-values before any Vault registry change.
+The script verifies every constructor value and runtime code hash before the
+deployment is accepted for Vault registration. Query `parentVault`, `asset`,
+`midnight`, `morphoBlue`, `ratifier`, `approvedQuoter`, and both market IDs.
 
 ## Initial configuration
 
-Configure the adapter through Vault V2's curator with the required timelocks:
+The constructor pins the single approved Morpho Blue market, economic policy,
+quoter, and Midnight market. Vault V2 governance must:
 
-1. Set the single approved Morpho Blue market.
-2. Configure the pinned Midnight market's economic policy.
-3. Set the quoter and root limits; roots are epoch-bound.
-4. Exercise allocation, callback, repayment, asynchronous maker-sell, and exact
+1. Verify the constructor and code hash.
+2. Add and cap the adapter through the Vault V2 timelock.
+3. Exercise allocation, callback, repayment, asynchronous maker-sell, and exact
    deallocation paths on the deterministic local deployment.
-5. Add the adapter to Vault V2 with the approved absolute and relative cap.
 
 The sentinel may only tighten policy, disable markets, revoke quoters, bump the
 risk-off epoch, and lower limits. Repayment collection remains available during
@@ -100,7 +102,7 @@ risk-off.
 
 Alert on:
 
-- `PolicyEpochIncremented`, `QuoterSet`, `MarketPolicySet`, and risk-off events;
+- `PolicyEpochIncremented`, `QuoterRevoked`, `MarketEconomicPolicyTightened`, and risk-off events;
 - Blue liquidity and adapter supply assets;
 - the parent Vault adapter allocation/cap;
 - book value, maturity claims, recognized losses, and realized P&L;
@@ -129,8 +131,10 @@ an operator, curator, quoter, or arbitrary receiver.
 
 ## Migration and incident handling
 
-A Blue market change is timelocked and cannot activate while the old market has
-supply. Revoke pending changes when incident response requires it. Preserve the
+A configuration change requires a replacement adapter. Deploy the new immutable
+adapter, verify its configuration and code hash, add and cap it through Vault V2
+governance, then risk-off/deallocate the old adapter as liquidity permits. Remove
+the old adapter only after tracked and actual positions are zero. Preserve the
 incident timeline, event logs, exact calldata, and local reproduction before
 trying recovery. Do not run a mainnet migration while the formal external audit
 is incomplete, an audit finding is unresolved, or written deployment approval is

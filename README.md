@@ -2,7 +2,11 @@
 
 Foundry scaffold for the permissionless Morpho Vault V2 / Midnight adapter described in [`docs/design.md`](docs/design.md).
 
-This Stage 1 branch intentionally contains no production behavior. It pins the upstream source graph and proves that the Vault V2, Midnight, and Morpho Blue interfaces compile together. Later stack layers add behavior in dependency order.
+The adapter is deployed directly with an immutable parent Vault, asset, Blue
+market, Midnight market, economic policy, ratifier, and approved quoter. Risk
+reduction is limited to one-way risk-off, epoch invalidation, quoter revocation,
+and Vault-governed policy tightening. Configuration changes require a replacement
+adapter and Vault V2's normal timelocked registration/cap process.
 
 ## Pinned dependencies
 

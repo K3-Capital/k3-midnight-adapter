@@ -7,6 +7,38 @@
         "type": "address"
       },
       {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "loanToken",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "collateralToken",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "oracle",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "irm",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "lltv",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct MarketParams",
+        "name": "_blueMarket",
+        "type": "tuple"
+      },
+      {
         "internalType": "address",
         "name": "_midnight",
         "type": "address"
@@ -89,15 +121,57 @@
         "internalType": "struct Market",
         "name": "_pinnedMidnightMarket",
         "type": "tuple"
+      },
+      {
+        "components": [
+          {
+            "internalType": "uint24",
+            "name": "maxBuyTick",
+            "type": "uint24"
+          },
+          {
+            "internalType": "uint24",
+            "name": "minSellTick",
+            "type": "uint24"
+          },
+          {
+            "internalType": "uint40",
+            "name": "maxTenor",
+            "type": "uint40"
+          },
+          {
+            "internalType": "uint40",
+            "name": "maxExpiryHorizon",
+            "type": "uint40"
+          },
+          {
+            "internalType": "uint32",
+            "name": "maxContinuousFeePerSecondWad",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint64",
+            "name": "maxSettlementFeeWad",
+            "type": "uint64"
+          },
+          {
+            "internalType": "bool",
+            "name": "configured",
+            "type": "bool"
+          }
+        ],
+        "internalType": "struct MarketEconomicPolicy",
+        "name": "_economicPolicy",
+        "type": "tuple"
+      },
+      {
+        "internalType": "address",
+        "name": "_approvedQuoter",
+        "type": "address"
       }
     ],
     "stateMutability": "nonpayable",
     "type": "constructor"
-  },
-  {
-    "inputs": [],
-    "name": "Abdicated",
-    "type": "error"
   },
   {
     "inputs": [],
@@ -112,16 +186,6 @@
   {
     "inputs": [],
     "name": "ApproveReverted",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "DataAlreadyPending",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "DataNotTimelocked",
     "type": "error"
   },
   {
@@ -196,21 +260,6 @@
   },
   {
     "inputs": [],
-    "name": "TimelockNotDecreasing",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "TimelockNotExpired",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "TimelockNotIncreasing",
-    "type": "error"
-  },
-  {
-    "inputs": [],
     "name": "Unauthorized",
     "type": "error"
   },
@@ -218,25 +267,6 @@
     "inputs": [],
     "name": "UnsupportedData",
     "type": "error"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "bytes4",
-        "name": "selector",
-        "type": "bytes4"
-      },
-      {
-        "indexed": false,
-        "internalType": "bytes",
-        "name": "data",
-        "type": "bytes"
-      }
-    ],
-    "name": "Accept",
-    "type": "event"
   },
   {
     "anonymous": false,
@@ -261,52 +291,6 @@
       }
     ],
     "name": "Allocate",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      },
-      {
-        "components": [
-          {
-            "internalType": "address",
-            "name": "loanToken",
-            "type": "address"
-          },
-          {
-            "internalType": "address",
-            "name": "collateralToken",
-            "type": "address"
-          },
-          {
-            "internalType": "address",
-            "name": "oracle",
-            "type": "address"
-          },
-          {
-            "internalType": "address",
-            "name": "irm",
-            "type": "address"
-          },
-          {
-            "internalType": "uint256",
-            "name": "lltv",
-            "type": "uint256"
-          }
-        ],
-        "indexed": false,
-        "internalType": "struct MarketParams",
-        "name": "market",
-        "type": "tuple"
-      }
-    ],
-    "name": "BlueMarketSet",
     "type": "event"
   },
   {
@@ -388,56 +372,13 @@
         "type": "bytes32"
       },
       {
-        "components": [
-          {
-            "internalType": "uint24",
-            "name": "maxBuyTick",
-            "type": "uint24"
-          },
-          {
-            "internalType": "uint24",
-            "name": "minSellTick",
-            "type": "uint24"
-          },
-          {
-            "internalType": "uint40",
-            "name": "maxTenor",
-            "type": "uint40"
-          },
-          {
-            "internalType": "uint40",
-            "name": "maxExpiryHorizon",
-            "type": "uint40"
-          },
-          {
-            "internalType": "uint32",
-            "name": "maxContinuousFeePerSecondWad",
-            "type": "uint32"
-          },
-          {
-            "internalType": "uint64",
-            "name": "maxSettlementFeeWad",
-            "type": "uint64"
-          },
-          {
-            "internalType": "bool",
-            "name": "configured",
-            "type": "bool"
-          }
-        ],
-        "indexed": false,
-        "internalType": "struct MarketEconomicPolicy",
-        "name": "policy",
-        "type": "tuple"
-      },
-      {
-        "indexed": false,
-        "internalType": "bool",
-        "name": "immediate",
-        "type": "bool"
+        "indexed": true,
+        "internalType": "uint64",
+        "name": "epoch",
+        "type": "uint64"
       }
     ],
-    "name": "MarketEconomicPolicySet",
+    "name": "MarketEconomicPolicyTightened",
     "type": "event"
   },
   {
@@ -467,15 +408,9 @@
         "internalType": "address",
         "name": "quoter",
         "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "bool",
-        "name": "enabled",
-        "type": "bool"
       }
     ],
-    "name": "QuoterSet",
+    "name": "QuoterRevoked",
     "type": "event"
   },
   {
@@ -508,31 +443,6 @@
     "inputs": [
       {
         "indexed": true,
-        "internalType": "address",
-        "name": "caller",
-        "type": "address"
-      },
-      {
-        "indexed": true,
-        "internalType": "bytes4",
-        "name": "selector",
-        "type": "bytes4"
-      },
-      {
-        "indexed": false,
-        "internalType": "bytes",
-        "name": "data",
-        "type": "bytes"
-      }
-    ],
-    "name": "Revoke",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
         "internalType": "bytes32",
         "name": "marketId",
         "type": "bytes32"
@@ -558,63 +468,6 @@
     ],
     "name": "SellFill",
     "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "bytes4",
-        "name": "selector",
-        "type": "bytes4"
-      },
-      {
-        "indexed": false,
-        "internalType": "bytes",
-        "name": "data",
-        "type": "bytes"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "executableAt",
-        "type": "uint256"
-      }
-    ],
-    "name": "Submit",
-    "type": "event"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes4",
-        "name": "selector",
-        "type": "bytes4"
-      }
-    ],
-    "name": "abdicate",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes4",
-        "name": "selector",
-        "type": "bytes4"
-      }
-    ],
-    "name": "abdicated",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
   },
   {
     "inputs": [
@@ -883,6 +736,19 @@
   },
   {
     "inputs": [],
+    "name": "approvedQuoter",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "asset",
     "outputs": [
       {
@@ -1043,47 +909,10 @@
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "bytes4",
-        "name": "selector",
-        "type": "bytes4"
-      },
-      {
-        "internalType": "uint256",
-        "name": "duration",
-        "type": "uint256"
-      }
-    ],
-    "name": "decreaseTimelock",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
     "inputs": [],
     "name": "disableMarket",
     "outputs": [],
     "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes",
-        "name": "data",
-        "type": "bytes"
-      }
-    ],
-    "name": "executableAt",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -1094,19 +923,6 @@
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "factory",
-    "outputs": [
-      {
-        "internalType": "address",
-        "name": "",
-        "type": "address"
       }
     ],
     "stateMutability": "view",
@@ -1128,26 +944,8 @@
   {
     "inputs": [
       {
-        "internalType": "bytes4",
-        "name": "selector",
-        "type": "bytes4"
-      },
-      {
-        "internalType": "uint256",
-        "name": "duration",
-        "type": "uint256"
-      }
-    ],
-    "name": "increaseTimelock",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
         "internalType": "address",
-        "name": "account",
+        "name": "quoter",
         "type": "address"
       }
     ],
@@ -1156,49 +954,6 @@
       {
         "internalType": "bool",
         "name": "",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "marketEconomicPolicy",
-    "outputs": [
-      {
-        "internalType": "uint24",
-        "name": "maxBuyTick",
-        "type": "uint24"
-      },
-      {
-        "internalType": "uint24",
-        "name": "minSellTick",
-        "type": "uint24"
-      },
-      {
-        "internalType": "uint40",
-        "name": "maxTenor",
-        "type": "uint40"
-      },
-      {
-        "internalType": "uint40",
-        "name": "maxExpiryHorizon",
-        "type": "uint40"
-      },
-      {
-        "internalType": "uint32",
-        "name": "maxContinuousFeePerSecondWad",
-        "type": "uint32"
-      },
-      {
-        "internalType": "uint64",
-        "name": "maxSettlementFeeWad",
-        "type": "uint64"
-      },
-      {
-        "internalType": "bool",
-        "name": "configured",
         "type": "bool"
       }
     ],
@@ -1548,6 +1303,19 @@
   },
   {
     "inputs": [],
+    "name": "quoterRevoked",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "ratifier",
     "outputs": [
       {
@@ -1570,19 +1338,6 @@
       }
     ],
     "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes",
-        "name": "data",
-        "type": "bytes"
-      }
-    ],
-    "name": "revoke",
-    "outputs": [],
-    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1642,127 +1397,6 @@
       {
         "components": [
           {
-            "internalType": "address",
-            "name": "loanToken",
-            "type": "address"
-          },
-          {
-            "internalType": "address",
-            "name": "collateralToken",
-            "type": "address"
-          },
-          {
-            "internalType": "address",
-            "name": "oracle",
-            "type": "address"
-          },
-          {
-            "internalType": "address",
-            "name": "irm",
-            "type": "address"
-          },
-          {
-            "internalType": "uint256",
-            "name": "lltv",
-            "type": "uint256"
-          }
-        ],
-        "internalType": "struct MarketParams",
-        "name": "market",
-        "type": "tuple"
-      }
-    ],
-    "name": "setBlueMarket",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "components": [
-          {
-            "internalType": "uint24",
-            "name": "maxBuyTick",
-            "type": "uint24"
-          },
-          {
-            "internalType": "uint24",
-            "name": "minSellTick",
-            "type": "uint24"
-          },
-          {
-            "internalType": "uint40",
-            "name": "maxTenor",
-            "type": "uint40"
-          },
-          {
-            "internalType": "uint40",
-            "name": "maxExpiryHorizon",
-            "type": "uint40"
-          },
-          {
-            "internalType": "uint32",
-            "name": "maxContinuousFeePerSecondWad",
-            "type": "uint32"
-          },
-          {
-            "internalType": "uint64",
-            "name": "maxSettlementFeeWad",
-            "type": "uint64"
-          },
-          {
-            "internalType": "bool",
-            "name": "configured",
-            "type": "bool"
-          }
-        ],
-        "internalType": "struct MarketEconomicPolicy",
-        "name": "policy",
-        "type": "tuple"
-      }
-    ],
-    "name": "setMarketEconomicPolicy",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "quoter",
-        "type": "address"
-      },
-      {
-        "internalType": "bool",
-        "name": "enabled",
-        "type": "bool"
-      }
-    ],
-    "name": "setQuoter",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes",
-        "name": "data",
-        "type": "bytes"
-      }
-    ],
-    "name": "submit",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "components": [
-          {
             "internalType": "uint24",
             "name": "maxBuyTick",
             "type": "uint24"
@@ -1806,25 +1440,6 @@
     "name": "tightenMarketEconomicPolicy",
     "outputs": [],
     "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes4",
-        "name": "selector",
-        "type": "bytes4"
-      }
-    ],
-    "name": "timelock",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
     "type": "function"
   }
 ]

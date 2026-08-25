@@ -3,10 +3,11 @@
 Foundry scaffold for the permissionless Morpho Vault V2 / Midnight adapter described in [`docs/design.md`](docs/design.md).
 
 The adapter is deployed directly with an immutable parent Vault, asset, Blue
-market, Midnight market, economic policy, ratifier, and approved quoter. Risk
-reduction is limited to one-way risk-off, epoch invalidation, quoter revocation,
-and Vault-governed policy tightening. Configuration changes require a replacement
-adapter and Vault V2's normal timelocked registration/cap process.
+market, Midnight market, economic policy, ratifier, and hot root-approver EOA.
+New exposure can be paused permanently; revocation, repayment, deallocation,
+and reduce-only recovery remain available. Policy changes are narrow Safe/Vault
+curator operations and increment the epoch, while deployment of a replacement
+adapter is the only recovery path for the immutable identities.
 
 ## Pinned dependencies
 

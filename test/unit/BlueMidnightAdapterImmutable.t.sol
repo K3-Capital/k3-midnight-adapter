@@ -76,7 +76,7 @@ contract BlueMidnightAdapterImmutableTest is Test {
             enterGate: address(0),
             liquidatorGate: address(0)
         });
-        policy = MarketEconomicPolicy(100, 1, 30 days, 20 days, 0, 0, true);
+        policy = MarketEconomicPolicy(100, 1, 20 days);
         adapter = new BlueMidnightAdapter(
             address(vault), blue, MIDNIGHT, MORPHO, address(ratifier), midnightMarket, policy, QUOTER
         );
@@ -88,20 +88,18 @@ contract BlueMidnightAdapterImmutableTest is Test {
         assertEq(adapter.midnight(), MIDNIGHT);
         assertEq(adapter.morphoBlue(), MORPHO);
         assertEq(adapter.ratifier(), address(ratifier));
-        assertEq(adapter.approvedQuoter(), QUOTER);
+        assertEq(adapter.rootApprover(), QUOTER);
         (MarketParams memory configured, bytes32 id) = adapter.blueMarket();
         assertEq(configured.loanToken, blue.loanToken);
         assertEq(configured.oracle, blue.oracle);
         assertEq(id, Id.unwrap(blue.id()));
-        assertTrue(adapter.blueMarketConfigured());
-        assertTrue(adapter.marketEnabled());
     }
 
     function testQuoterRevocationEnablesSentinelRecoveryRootButNotBuys() public {
         bytes32 root = keccak256("recovery-root");
         vault.setSentinel(address(this), true);
-        adapter.revokeQuoter(QUOTER);
-        assertTrue(adapter.riskOffActive());
+        adapter.pauseNewExposure(bytes32("pause"));
+        assertTrue(adapter.newExposurePaused());
         vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
         adapter.approveRoot(root);
         adapter.approveRecoveryRoot(root);

@@ -98,10 +98,16 @@ forge script script/DeployPilot.s.sol --rpc-url "$RPC_URL" --broadcast
 
 The script verifies every constructor value and runtime code hash before the
 deployment is accepted for Vault registration. Query `parentVault`, `asset`,
-`midnight`, `morphoBlue`, `ratifier`, `approvedQuoter`, and both market IDs.
+`midnight`, `morphoBlue`, `ratifier`, `rootApprover`, and both market IDs.
 
-The current build reports 18,991 runtime bytes and 23,307 creation bytes. The
-runtime delta versus the approved Stage 3 measurement (22,916 bytes) is -3,925
+The root approver EOA can only relay root approval/revocation. Safe-administered
+policy setters control `maxBuyTick`, `minSellTick`, and `maxExpiryHorizon`; each
+accepted change increments the policy epoch and invalidates prior roots. The
+sentinel's `pauseNewExposure` is monotonic: it stops new buys, approvals, and
+allocation while preserving exits and recovery.
+
+The current build reports 16,882 runtime bytes and 20,734 creation bytes. The
+runtime delta versus the approved Stage 3 measurement (18,991 bytes) is -2,109
 bytes. `runtime_bytes * 200` is only the EVM runtime code-deposit component
 (3,798,200 gas). The reproducible local direct-CREATE fixture is:
 

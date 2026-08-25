@@ -27,7 +27,7 @@ contract SolvencyInvariantTest is Test {
             address(morpho),
             address(5),
             AdapterTestMarket.make(address(4), address(token)),
-            MarketEconomicPolicy(1_000, 0, 30 days, 20 days, 0, 0, true),
+            MarketEconomicPolicy(1_000, 0, 20 days),
             address(this)
         );
     }

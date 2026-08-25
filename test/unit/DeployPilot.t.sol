@@ -57,7 +57,7 @@ contract DeployPilotVerificationTest is Test {
             enterGate: address(0),
             liquidatorGate: address(0)
         });
-        policy = MarketEconomicPolicy(100, 1, 30 days, 20 days, 0, 0, true);
+        policy = MarketEconomicPolicy(100, 1, 20 days);
         adapter = new BlueMidnightAdapter(
             address(vault), blueMarket, MIDNIGHT, MORPHO, address(ratifier), midnightMarket, policy, QUOTER
         );

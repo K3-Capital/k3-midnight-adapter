@@ -55,7 +55,7 @@ contract BlueMidnightAdapterCallbacksTest is Test {
             liquidatorGate: address(0)
         });
         MarketParams memory blueMarket = MarketParams(address(token), address(1), address(2), address(3), 0);
-        MarketEconomicPolicy memory policy = MarketEconomicPolicy(1_000, 0, 30 days, 20 days, 0, 0, true);
+        MarketEconomicPolicy memory policy = MarketEconomicPolicy(1_000, 0, 20 days);
         adapter = new BlueMidnightAdapter(
             address(vault),
             blueMarket,

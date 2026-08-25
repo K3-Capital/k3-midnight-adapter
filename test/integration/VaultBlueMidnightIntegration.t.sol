@@ -132,13 +132,7 @@ contract VaultBlueMidnightIntegrationTest is Test {
         midnightMarketId = HashLib.hashMarket(midnightMarket);
 
         MarketEconomicPolicy memory policy = MarketEconomicPolicy({
-            maxBuyTick: uint24(MAX_TICK),
-            minSellTick: uint24(MAX_TICK),
-            maxTenor: uint40(30 days),
-            maxExpiryHorizon: uint40(30 days),
-            maxContinuousFeePerSecondWad: 0,
-            maxSettlementFeeWad: uint64(MAX_SETTLEMENT_FEE_360_DAYS),
-            configured: true
+            maxBuyTick: uint24(MAX_TICK), minSellTick: uint24(MAX_TICK), maxExpiryHorizon: uint40(20 days)
         });
         adapter = new BlueMidnightAdapter(
             address(vault),
@@ -312,8 +306,8 @@ contract VaultBlueMidnightIntegrationTest is Test {
         assertEq(adapter.accounting().trackedCredit, UNITS);
 
         _vaultCall(abi.encodeCall(vault.setIsSentinel, (address(this), true)));
-        adapter.revokeQuoter(address(this));
-        assertTrue(adapter.riskOffActive());
+        adapter.pauseNewExposure(bytes32("pause"));
+        assertTrue(adapter.newExposurePaused());
 
         Offer memory sell = _sellOffer(UNITS);
         bytes32 root = HashLib.hashOffer(sell);

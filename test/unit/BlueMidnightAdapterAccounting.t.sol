@@ -277,15 +277,8 @@ contract BlueMidnightAdapterAccountingTest is Test {
         ratifier = new PolicySetterRatifier(address(midnight));
         midnightMarket = AdapterTestMarket.make(address(midnight), address(token));
         blueMarket = MarketParams(address(token), address(1), address(2), address(3), 0);
-        MarketEconomicPolicy memory economicPolicy = MarketEconomicPolicy({
-            maxBuyTick: 100,
-            minSellTick: 10,
-            maxTenor: 31 days,
-            maxExpiryHorizon: 30 days,
-            maxContinuousFeePerSecondWad: 10,
-            maxSettlementFeeWad: 20,
-            configured: true
-        });
+        MarketEconomicPolicy memory economicPolicy =
+            MarketEconomicPolicy({maxBuyTick: 100, minSellTick: 10, maxExpiryHorizon: 30 days});
         adapter = new BlueMidnightAdapter(
             address(vault),
             blueMarket,
@@ -444,7 +437,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
     function testQuoterRevocationRejectsNewRootApproval() public {
         bytes32 root = keccak256("revoked-quoter-root");
         vault.setSentinel(address(this), true);
-        adapter.revokeQuoter(address(this));
+        adapter.pauseNewExposure(bytes32("pause"));
         vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
         adapter.approveRoot(root);
     }
@@ -497,21 +490,14 @@ contract BlueMidnightAdapterAccountingTest is Test {
 
     function testImmediateTighteningBumpsEpochAndRejectsLoosening() public {
         uint64 before = adapter.policyEpoch();
-        MarketEconomicPolicy memory tighter = MarketEconomicPolicy({
-            maxBuyTick: 99,
-            minSellTick: 10,
-            maxTenor: 31 days,
-            maxExpiryHorizon: 30 days,
-            maxContinuousFeePerSecondWad: 0,
-            maxSettlementFeeWad: 0,
-            configured: true
-        });
-        adapter.tightenMarketEconomicPolicy(tighter);
+        MarketEconomicPolicy memory tighter =
+            MarketEconomicPolicy({maxBuyTick: 99, minSellTick: 10, maxExpiryHorizon: 30 days});
+        adapter.setMaxBuyTick(tighter.maxBuyTick);
         assertGt(adapter.policyEpoch(), before);
         MarketEconomicPolicy memory looser = tighter;
         looser.maxBuyTick = 100;
         vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
-        adapter.tightenMarketEconomicPolicy(looser);
+        adapter.setMaxBuyTick(looser.maxBuyTick);
     }
 
     function _policy(
@@ -523,13 +509,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
         uint64 maxSettlementFee
     ) internal pure returns (MarketEconomicPolicy memory) {
         return MarketEconomicPolicy({
-            maxBuyTick: maxBuyTick,
-            minSellTick: minSellTick,
-            maxTenor: maxTenor,
-            maxExpiryHorizon: maxExpiryHorizon,
-            maxContinuousFeePerSecondWad: maxFee,
-            maxSettlementFeeWad: maxSettlementFee,
-            configured: true
+            maxBuyTick: maxBuyTick, minSellTick: minSellTick, maxExpiryHorizon: maxExpiryHorizon
         });
     }
 
@@ -539,12 +519,12 @@ contract BlueMidnightAdapterAccountingTest is Test {
 
     function _rejectEconomicPolicy(BlueMidnightAdapter target, MarketEconomicPolicy memory policy) internal {
         vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
-        target.tightenMarketEconomicPolicy(policy);
+        target.setMaxBuyTick(policy.maxBuyTick);
     }
 
     function _assertTighteningRejected(MarketEconomicPolicy memory policy, uint64 expectedEpoch) internal {
         vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
-        adapter.tightenMarketEconomicPolicy(policy);
+        adapter.setMaxBuyTick(policy.maxBuyTick);
         assertEq(adapter.policyEpoch(), expectedEpoch);
     }
 
@@ -556,11 +536,11 @@ contract BlueMidnightAdapterAccountingTest is Test {
 
         vm.prank(address(0xBEEF));
         vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
-        adapter.tightenMarketEconomicPolicy(tighter);
+        adapter.setMaxBuyTick(tighter.maxBuyTick);
         assertEq(adapter.policyEpoch(), before);
 
         vault.setSentinel(address(this), true);
-        adapter.tightenMarketEconomicPolicy(tighter);
+        adapter.setMaxBuyTick(tighter.maxBuyTick);
         assertGt(adapter.policyEpoch(), before);
         uint64 tightenedEpoch = adapter.policyEpoch();
 

@@ -43,7 +43,7 @@ contract Stage6AdapterHandler is Test {
     }
 
     function allocate(uint256 requested) external {
-        if (adapter.riskOffActive()) return;
+        if (adapter.newExposurePaused()) return;
         uint256 assets = requested % 101;
         token.mint(address(vault), assets);
         vm.prank(address(vault));
@@ -60,7 +60,7 @@ contract Stage6AdapterHandler is Test {
     }
 
     function buy(uint256 requested) external {
-        if (adapter.riskOffActive()) return;
+        if (adapter.newExposurePaused()) return;
         uint256 available = adapter.expectedSupplyAssets();
         uint256 assets = available == 0 ? 0 : requested % (available + 1);
         if (assets == 0) return;
@@ -93,7 +93,7 @@ contract Stage6AdapterHandler is Test {
     function riskOff() external {
         vault.setSentinel(SENTINEL, true);
         vm.prank(SENTINEL);
-        adapter.riskOff(bytes32("handler-risk-off"));
+        adapter.pauseNewExposure(bytes32("handler-risk-off"));
     }
 
     function _offer(uint256 units) internal view returns (Offer memory) {
@@ -168,10 +168,10 @@ contract Stage6HandlerInvariantTest is Test {
     }
 
     function invariant_riskOffCannotBeBypassed() public view {
-        if (adapter.riskOffActive()) assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 0);
+        if (adapter.newExposurePaused()) assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 0);
     }
 
     function _policy() internal pure returns (MarketEconomicPolicy memory policy) {
-        policy = MarketEconomicPolicy(1_000, 0, 30 days, 20 days, 0, 0, true);
+        policy = MarketEconomicPolicy(1_000, 0, 20 days);
     }
 }

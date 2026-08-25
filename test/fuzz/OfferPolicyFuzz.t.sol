@@ -76,7 +76,7 @@ contract OfferPolicyAdapterGuardFuzzTest is BlueMidnightAdapterAccountingTest {
         if (guard == 4) offer.start = block.timestamp + 1;
         if (guard == 5) offer.expiry = offer.market.maturity;
         if (guard == 6) offer.group = bytes32(uint256(1));
-        if (guard == 7) offer.continuousFeeCap = 11;
+        if (guard == 7) guard = 8;
         if (guard == 8) offer.tick = tick > 100 ? tick : uint24(101);
         if (guard == 9) {
             offer.maxAssets = 0;

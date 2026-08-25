@@ -43,6 +43,8 @@ There is no curator, quoter, or operator rescue path for primary assets.
 | Known protocol loss hidden in NAV | Callback and checkpoint synchronization reduces tracked claims/book value when Midnight or Blue state loses value. |
 | Illiquid withdrawal silently underpays | Deallocation uses adapter cash first, withdraws only the shortfall from configured Blue, and reverts atomically if exact liquidity is unavailable. |
 | Synchronous exit reaches Midnight or arbitrary receiver | Deallocation decodes only the configured Blue market. Maker sells are separate, policy-validated operations with proceeds pinned to the adapter. |
+| Midnight fee policy changes | Settlement and continuous fees remain Midnight protocol-owned external risk; the adapter deliberately applies no duplicate fee ceiling. |
+| Emergency exposure pause | `newExposurePaused` is monotonic and blocks new approvals, allocation, and buys while retaining revocation, deallocation, repayment, and reduce-only recovery. |
 | Reentrancy during external protocol calls | State and caps are checked before transfers; callback entry points require Midnight; no generic external-call primitive exists. |
 | Allowance theft | Allowances are exact-reset for Midnight settlement; quoter is never a spender of adapter assets. |
 

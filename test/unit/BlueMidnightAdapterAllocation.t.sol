@@ -130,7 +130,7 @@ contract BlueMidnightAdapterAllocationTest is Test {
         vault = new AllocationVault(address(token));
         morpho = new AllocationMorpho(address(token));
         market.loanToken = address(token);
-        MarketEconomicPolicy memory policy = MarketEconomicPolicy(1_000, 0, 30 days, 20 days, 0, 0, true);
+        MarketEconomicPolicy memory policy = MarketEconomicPolicy(1_000, 0, 20 days);
         adapter = new BlueMidnightAdapter(
             address(vault), market, address(4), address(morpho), address(5), _pinnedMarket(), policy, address(this)
         );
@@ -201,7 +201,7 @@ contract BlueMidnightAdapterAllocationTest is Test {
 
         assertEq(adapter.blueAvailableLiquidity(), 100_000);
         assertEq(adapter.expectedSupplyAssets(), 500_000);
-        assertFalse(adapter.riskOffActive());
+        assertFalse(adapter.newExposurePaused());
         assertEq(adapter.blueAvailableLiquidity(), 100_000);
     }
 
@@ -219,6 +219,6 @@ contract BlueMidnightAdapterAllocationTest is Test {
         assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 700);
 
         morpho.setMarket(market.id(), 1_000, 2_000_000, 800);
-        assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 200);
+        assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 700);
     }
 }

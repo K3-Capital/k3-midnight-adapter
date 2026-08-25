@@ -14,6 +14,15 @@ contract ImmutableToken {
     }
 }
 
+contract RecoveryRatifier {
+    mapping(address => mapping(bytes32 => bool)) public approved;
+
+    function setRoot(address maker, bytes32 root, bool enabled) external {
+        require(msg.sender == maker, "maker");
+        approved[maker][root] = enabled;
+    }
+}
+
 contract ImmutableVault {
     address public immutable asset;
     address public immutable curator;
@@ -41,13 +50,13 @@ contract BlueMidnightAdapterImmutableTest is Test {
     using MarketParamsLib for MarketParams;
     ImmutableToken internal token;
     ImmutableVault internal vault;
+    RecoveryRatifier internal ratifier;
     BlueMidnightAdapter internal adapter;
     MarketParams internal blue;
     Market internal midnightMarket;
     MarketEconomicPolicy internal policy;
     address internal constant MIDNIGHT = address(0x100);
     address internal constant MORPHO = address(0x200);
-    address internal constant RATIFFER = address(0x300);
     address internal constant QUOTER = address(0x400);
     address internal constant ORACLE = address(0x500);
     address internal constant IRM = address(0x600);
@@ -55,6 +64,7 @@ contract BlueMidnightAdapterImmutableTest is Test {
     function setUp() public {
         token = new ImmutableToken();
         vault = new ImmutableVault(address(token));
+        ratifier = new RecoveryRatifier();
         blue = MarketParams(address(token), address(0), ORACLE, IRM, 0);
         midnightMarket = Market({
             chainId: block.chainid,
@@ -67,8 +77,9 @@ contract BlueMidnightAdapterImmutableTest is Test {
             liquidatorGate: address(0)
         });
         policy = MarketEconomicPolicy(100, 1, 30 days, 20 days, 0, 0, true);
-        adapter =
-            new BlueMidnightAdapter(address(vault), blue, MIDNIGHT, MORPHO, RATIFFER, midnightMarket, policy, QUOTER);
+        adapter = new BlueMidnightAdapter(
+            address(vault), blue, MIDNIGHT, MORPHO, address(ratifier), midnightMarket, policy, QUOTER
+        );
     }
 
     function testConstructorPinsAllDeploymentIdentity() public view {
@@ -76,7 +87,7 @@ contract BlueMidnightAdapterImmutableTest is Test {
         assertEq(adapter.asset(), address(token));
         assertEq(adapter.midnight(), MIDNIGHT);
         assertEq(adapter.morphoBlue(), MORPHO);
-        assertEq(adapter.ratifier(), RATIFFER);
+        assertEq(adapter.ratifier(), address(ratifier));
         assertEq(adapter.approvedQuoter(), QUOTER);
         (MarketParams memory configured, bytes32 id) = adapter.blueMarket();
         assertEq(configured.loanToken, blue.loanToken);
@@ -86,20 +97,30 @@ contract BlueMidnightAdapterImmutableTest is Test {
         assertTrue(adapter.marketEnabled());
     }
 
-    function testQuoterRevocationAndRiskOffAreMonotonic() public {
+    function testQuoterRevocationEnablesSentinelRecoveryRootButNotBuys() public {
+        bytes32 root = keccak256("recovery-root");
         vault.setSentinel(address(this), true);
         adapter.revokeQuoter(QUOTER);
-        assertFalse(adapter.isQuoter(QUOTER));
-        vm.prank(address(this));
-        adapter.riskOff(bytes32("incident"));
         assertTrue(adapter.riskOffActive());
+        vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
+        adapter.approveRoot(root);
+        adapter.approveRecoveryRoot(root);
+        assertTrue(ratifier.approved(address(adapter), root));
         assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 0);
+    }
+
+    function testRiskOffRecoveryRootCannotBeApprovedBeforeEmergency() public {
+        vault.setSentinel(address(this), true);
+        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
+        adapter.approveRecoveryRoot(keccak256("too-early"));
     }
 
     function testInvalidBlueLoanAssetReverts() public {
         MarketParams memory invalid = blue;
         invalid.loanToken = address(0xBAD);
         vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
-        new BlueMidnightAdapter(address(vault), invalid, MIDNIGHT, MORPHO, RATIFFER, midnightMarket, policy, QUOTER);
+        new BlueMidnightAdapter(
+            address(vault), invalid, MIDNIGHT, MORPHO, address(ratifier), midnightMarket, policy, QUOTER
+        );
     }
 }

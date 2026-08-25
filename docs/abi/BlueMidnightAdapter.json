@@ -119,7 +119,7 @@
           }
         ],
         "internalType": "struct Market",
-        "name": "_pinnedMidnightMarket",
+        "name": "_market",
         "type": "tuple"
       },
       {
@@ -411,6 +411,25 @@
       }
     ],
     "name": "QuoterRevoked",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "root",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint64",
+        "name": "epoch",
+        "type": "uint64"
+      }
+    ],
+    "name": "RecoveryRootApproved",
     "type": "event"
   },
   {
@@ -729,6 +748,19 @@
         "type": "bytes32"
       }
     ],
+    "name": "approveRecoveryRoot",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "root",
+        "type": "bytes32"
+      }
+    ],
     "name": "approveRoot",
     "outputs": [],
     "stateMutability": "nonpayable",
@@ -955,6 +987,56 @@
         "internalType": "bool",
         "name": "",
         "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "marketEconomicPolicy",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint24",
+            "name": "maxBuyTick",
+            "type": "uint24"
+          },
+          {
+            "internalType": "uint24",
+            "name": "minSellTick",
+            "type": "uint24"
+          },
+          {
+            "internalType": "uint40",
+            "name": "maxTenor",
+            "type": "uint40"
+          },
+          {
+            "internalType": "uint40",
+            "name": "maxExpiryHorizon",
+            "type": "uint40"
+          },
+          {
+            "internalType": "uint32",
+            "name": "maxContinuousFeePerSecondWad",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint64",
+            "name": "maxSettlementFeeWad",
+            "type": "uint64"
+          },
+          {
+            "internalType": "bool",
+            "name": "configured",
+            "type": "bool"
+          }
+        ],
+        "internalType": "struct MarketEconomicPolicy",
+        "name": "",
+        "type": "tuple"
       }
     ],
     "stateMutability": "view",
@@ -1257,6 +1339,83 @@
         "internalType": "address",
         "name": "",
         "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "pinnedMidnightMarket",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "chainId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "address",
+            "name": "midnight",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "loanToken",
+            "type": "address"
+          },
+          {
+            "components": [
+              {
+                "internalType": "address",
+                "name": "token",
+                "type": "address"
+              },
+              {
+                "internalType": "uint256",
+                "name": "lltv",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "liquidationCursor",
+                "type": "uint256"
+              },
+              {
+                "internalType": "address",
+                "name": "oracle",
+                "type": "address"
+              }
+            ],
+            "internalType": "struct CollateralParams[]",
+            "name": "collateralParams",
+            "type": "tuple[]"
+          },
+          {
+            "internalType": "uint256",
+            "name": "maturity",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "rcfThreshold",
+            "type": "uint256"
+          },
+          {
+            "internalType": "address",
+            "name": "enterGate",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "liquidatorGate",
+            "type": "address"
+          }
+        ],
+        "internalType": "struct Market",
+        "name": "market",
+        "type": "tuple"
       }
     ],
     "stateMutability": "view",

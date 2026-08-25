@@ -8,11 +8,14 @@ deallocate. Morpho Blue and Midnight are external protocols whose pinned
 interfaces and callback ordering are assumptions that must be checked again
 when dependencies change.
 
-The curator controls policy expansion only through selector-specific timelocks.
-The sentinel can reduce risk immediately but cannot expand it. The quoter may
-only approve or revoke roots through the adapter; it is not authorized in
-Midnight or Morpho Blue and cannot select a receiver, callback, market, or
-arbitrary external call.
+The constructor pins the Blue market, Midnight market, economic policy, ratifier,
+and quoter. There is no selector-timelock or factory deployment surface.
+Configuration expansion requires deploying a replacement adapter and
+registering/capping it through Vault V2 governance. The sentinel can reduce risk
+immediately but cannot expand it. The quoter may only approve roots through the
+adapter; revocation is sentinel-controlled. It is not authorized in Midnight or
+Morpho Blue and cannot select a receiver, callback, market, or arbitrary external
+call.
 
 ## Assets and allowed flows
 
@@ -33,7 +36,7 @@ There is no curator, quoter, or operator rescue path for primary assets.
 | Compromised quoter drains pooled assets | Quoter has root-management only; adapter validates maker, callback, receiver, market, epoch, and economics. |
 | Malicious sell order redirects proceeds | `receiverIfMakerIsSeller == adapter`, `reduceOnly`, policy tick, and callback caller checks. |
 | Stale root after policy change | Root approvals are bound to non-zero `policyEpoch`; every accepted change increments the epoch. |
-| Curator instant risk expansion | Expansion selectors use exact calldata timelocks; sentinel can revoke pending data. |
+| Curator instant risk expansion | No adapter expansion setter exists; replacement configuration goes through a new adapter and Vault V2 governance. |
 | Sentinel expands risk | Sentinel entry points only tighten policy, disable the pinned market, revoke quoters, or activate risk-off. The parent Vault adapter cap is the sole concentration boundary. |
 | Arbitrary Blue routing | Adapter stores one market and rejects callback routing data that is not empty. |
 | NAV double count during Blue/Midnight transitions | Immediate liquidity is adapter cash plus currently withdrawable Blue assets; open Midnight face value is excluded until repayment or an asynchronous sell. |
@@ -50,6 +53,9 @@ There is no curator, quoter, or operator rescue path for primary assets.
   repayment or a policy-valid asynchronous maker sell.
 - Midnight and Morpho Blue correctness, oracle/economic behavior, and availability
   remain external dependencies.
+- Quoter revocation and risk-off invalidate the current root epoch and latch buys
+  off. A Vault sentinel may approve a recovery root only for the already pinned
+  adapter; the offer predicate still requires reduce-only maker-sell recovery.
 - The local integration suite is deterministic and does not replace a fork or
   independent audit.
 - Mainnet deployment is explicitly blocked until a formal independent external
@@ -63,8 +69,8 @@ There is no curator, quoter, or operator rescue path for primary assets.
 ## Review checklist
 
 Before release, the implementation reviewer should independently verify
-constructor immutables, every external call and callback ordering, accounting
-bounds and rounding, timelock selector binding, root epoch invalidation,
+constructor immutables (including full market and policy structs), every external call and callback ordering, accounting
+bounds and rounding, replacement deployment verification, root epoch invalidation,
 receiver pinning, exact-or-revert exits, constant-time market accounting, all
 invariant handlers, and deterministic ABI artifacts. Record implementation
 findings and their remediation commit in the release change record. Separately,

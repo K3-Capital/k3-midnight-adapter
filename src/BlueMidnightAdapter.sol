@@ -44,6 +44,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     error RepaymentUnavailable();
 
     event QuoterRevoked(address indexed quoter);
+    event RecoveryRootApproved(bytes32 indexed root, uint64 indexed epoch);
     event PolicyEpochIncremented(uint64 indexed epoch, bytes32 reason);
 
     event Allocate(bytes32 indexed marketId, uint256 assets, uint256 shares);
@@ -67,7 +68,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     uint64 public policyEpoch;
     bool public riskOffActive;
 
-    MidnightMarket internal pinnedMidnightMarket;
+    MidnightMarket internal _pinnedMidnightMarket;
     bytes32 public immutable pinnedMidnightMarketId;
     bytes32 public immutable pinnedMidnightMarketHash;
     // Exactly one immutable Midnight market is configured, so accounting is scalar.
@@ -83,14 +84,14 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         address _midnight,
         address _morphoBlue,
         address _ratifier,
-        MidnightMarket memory _pinnedMidnightMarket,
+        MidnightMarket memory _market,
         MarketEconomicPolicy memory _economicPolicy,
         address _approvedQuoter
     ) {
         if (
             _parentVault == address(0) || _midnight == address(0) || _morphoBlue == address(0)
-                || _pinnedMidnightMarket.midnight != _midnight || _pinnedMidnightMarket.loanToken == address(0)
-                || _pinnedMidnightMarket.loanToken != IVaultV2(_parentVault).asset()
+                || _market.midnight != _midnight || _market.loanToken == address(0)
+                || _market.loanToken != IVaultV2(_parentVault).asset()
                 || _blueMarket.loanToken != IVaultV2(_parentVault).asset() || _blueMarket.oracle == address(0)
                 || _blueMarket.irm == address(0) || _ratifier == address(0) || _approvedQuoter == address(0)
         ) revert InvalidValue();
@@ -100,9 +101,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         ratifier = _ratifier;
         blue = BlueMarketConfig({market: _blueMarket, marketId: Id.unwrap(_blueMarket.id())});
         blueMarketConfigured = true;
-        pinnedMidnightMarket = _pinnedMidnightMarket;
-        pinnedMidnightMarketId = IdLib.toId(_pinnedMidnightMarket);
-        pinnedMidnightMarketHash = HashLib.hashMarket(_pinnedMidnightMarket);
+        _pinnedMidnightMarket = _market;
+        pinnedMidnightMarketId = IdLib.toId(_market);
+        pinnedMidnightMarketHash = HashLib.hashMarket(_market);
         asset = IVaultV2(_parentVault).asset();
         adapterId = RiskIdLib.adapter(address(this));
         _validateEconomicPolicy(_economicPolicy);
@@ -147,6 +148,17 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (!success) revert InvalidCallback();
     }
 
+    /// @notice Approves a root for reduce-only recovery after emergency invalidation.
+    /// @dev Sentinel approval cannot reopen buys: risk-off is latched and acceptsOffer
+    /// still applies the reduce-only predicate before the ratifier can accept a leaf.
+    function approveRecoveryRoot(bytes32 root) external onlySentinel {
+        if (root == bytes32(0) || (!riskOffActive && !quoterRevoked)) revert InvalidValue();
+        (bool success,) =
+            ratifier.call(abi.encodeWithSignature("setRoot(address,bytes32,bool)", address(this), root, true));
+        if (!success) revert InvalidCallback();
+        emit RecoveryRootApproved(root, policyEpoch);
+    }
+
     function revokeRoot(bytes32 root) external {
         if (!isQuoter(msg.sender) || root == bytes32(0)) revert Unauthorized();
         (bool success,) =
@@ -179,6 +191,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     function revokeQuoter(address quoter) external onlySentinel {
         if (quoter != approvedQuoter) revert InvalidValue();
         quoterRevoked = true;
+        riskOffActive = true;
         _bumpEpoch("quoter-revoke");
         emit QuoterRevoked(quoter);
     }
@@ -248,7 +261,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     /// @dev This path is intentionally available while risk-off is active.
     function collectRepayment(uint256 requestedUnits) external returns (uint256 totalAssets) {
         if (!marketKnown(pinnedMidnightMarketHash)) revert InvalidMarket();
-        _checkpoint(pinnedMidnightMarketHash, pinnedMidnightMarket, 0, 0);
+        _checkpoint(pinnedMidnightMarketHash, _pinnedMidnightMarket, 0, 0);
         uint256 units = requestedUnits;
         uint256 available = IMidnight(midnight).withdrawable(pinnedMidnightMarketId);
         uint256 credit = accountingState.trackedCredit;
@@ -256,7 +269,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (units == 0 || units > available) units = available;
         if (units == 0) revert RepaymentUnavailable();
         uint256 beforeBalance = IERC20(asset).balanceOf(address(this));
-        IMidnight(midnight).withdraw(pinnedMidnightMarket, units, address(this), address(this));
+        IMidnight(midnight).withdraw(_pinnedMidnightMarket, units, address(this), address(this));
         uint256 received = IERC20(asset).balanceOf(address(this)) - beforeBalance;
         if (received == 0) revert RepaymentUnavailable();
         _reduceCreditAfterRecovery(pinnedMidnightMarketHash, units);
@@ -291,6 +304,14 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
 
     function blueMarket() external view returns (MarketParams memory market, bytes32 marketId) {
         return (blue.market, blue.marketId);
+    }
+
+    function pinnedMidnightMarket() external view returns (MidnightMarket memory market) {
+        return _pinnedMidnightMarket;
+    }
+
+    function marketEconomicPolicy() external view returns (MarketEconomicPolicy memory) {
+        return economicPolicy;
     }
 
     function blueAvailableLiquidity() public view returns (uint256) {
@@ -519,7 +540,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     function _conservativeBookValue() internal view returns (uint256) {
         MarketAccounting memory a = accountingState;
         if (!a.active || a.trackedCredit == 0) return a.bookValue;
-        MidnightMarket memory market = pinnedMidnightMarket;
+        MidnightMarket memory market = _pinnedMidnightMarket;
         (uint128 credit, uint128 pendingFee,) =
             IMidnight(midnight).updatePositionView(market, IdLib.toId(market), address(this));
         uint256 claim = uint256(credit) + uint256(pendingFee);

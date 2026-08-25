@@ -3,13 +3,19 @@ pragma solidity 0.8.34;
 
 import {Script} from "forge-std/Script.sol";
 import {BlueMidnightAdapter} from "../src/BlueMidnightAdapter.sol";
-import {Market} from "midnight/interfaces/IMidnight.sol";
-import {MarketParams} from "morpho-blue/interfaces/IMorpho.sol";
+import {Market, CollateralParams} from "midnight/interfaces/IMidnight.sol";
+import {MarketParams, Id} from "morpho-blue/interfaces/IMorpho.sol";
+import {MarketParamsLib} from "morpho-blue/libraries/MarketParamsLib.sol";
+import {IVaultV2} from "vault-v2/interfaces/IVaultV2.sol";
 import {MarketEconomicPolicy} from "../src/types/AdapterTypes.sol";
+import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
+import {IdLib} from "midnight/libraries/IdLib.sol";
 
 /// @notice Deploys one adapter directly from explicit immutable configuration.
-/// @dev The script verifies every constructor value and runtime code hash before broadcast.
+/// @dev Verification runs before the operator registers the adapter with Vault V2.
 contract DeployPilot is Script {
+    using MarketParamsLib for MarketParams;
+
     function run() external returns (address adapter) {
         address parentVault = vm.envAddress("PARENT_VAULT");
         MarketParams memory blueMarket = abi.decode(vm.envBytes("BLUE_MARKET"), (MarketParams));
@@ -29,11 +35,59 @@ contract DeployPilot is Script {
         );
         vm.stopBroadcast();
 
-        require(BlueMidnightAdapter(adapter).parentVault() == parentVault, "parent vault mismatch");
-        require(BlueMidnightAdapter(adapter).midnight() == midnight, "midnight mismatch");
-        require(BlueMidnightAdapter(adapter).morphoBlue() == morphoBlue, "morpho mismatch");
-        require(BlueMidnightAdapter(adapter).ratifier() == ratifier, "ratifier mismatch");
-        require(BlueMidnightAdapter(adapter).approvedQuoter() == quoter, "quoter mismatch");
+        BlueMidnightAdapter deployed = BlueMidnightAdapter(adapter);
+        require(deployed.parentVault() == parentVault, "parent vault mismatch");
+        require(deployed.asset() == IVaultV2(parentVault).asset(), "asset mismatch");
+        require(deployed.midnight() == midnight, "midnight mismatch");
+        require(deployed.morphoBlue() == morphoBlue, "morpho mismatch");
+        require(deployed.ratifier() == ratifier, "ratifier mismatch");
+        require(deployed.approvedQuoter() == quoter, "quoter mismatch");
+        _verifyBlueMarket(deployed, blueMarket);
+        _verifyMidnightMarket(deployed, pinnedMidnightMarket);
+        _verifyPolicy(deployed.marketEconomicPolicy(), policy);
         require(adapter.codehash == expectedCodeHash, "runtime code hash mismatch");
+    }
+
+    function _verifyBlueMarket(BlueMidnightAdapter deployed, MarketParams memory expected) internal view {
+        (MarketParams memory actual, bytes32 id) = deployed.blueMarket();
+        require(actual.loanToken == expected.loanToken, "blue loan token mismatch");
+        require(actual.collateralToken == expected.collateralToken, "blue collateral token mismatch");
+        require(actual.oracle == expected.oracle, "blue oracle mismatch");
+        require(actual.irm == expected.irm, "blue irm mismatch");
+        require(actual.lltv == expected.lltv, "blue lltv mismatch");
+        require(id == Id.unwrap(expected.id()), "blue market id mismatch");
+    }
+
+    function _verifyMidnightMarket(BlueMidnightAdapter deployed, Market memory expected) internal view {
+        Market memory actual = deployed.pinnedMidnightMarket();
+        require(HashLib.hashMarket(actual) == HashLib.hashMarket(expected), "midnight market hash mismatch");
+        require(IdLib.toId(actual) == IdLib.toId(expected), "midnight market id mismatch");
+        require(actual.chainId == expected.chainId, "midnight chain mismatch");
+        require(actual.midnight == expected.midnight, "midnight address mismatch");
+        require(actual.loanToken == expected.loanToken, "midnight loan token mismatch");
+        require(actual.maturity == expected.maturity, "midnight maturity mismatch");
+        require(actual.rcfThreshold == expected.rcfThreshold, "midnight threshold mismatch");
+        require(actual.enterGate == expected.enterGate, "midnight enter gate mismatch");
+        require(actual.liquidatorGate == expected.liquidatorGate, "midnight liquidator gate mismatch");
+        require(actual.collateralParams.length == expected.collateralParams.length, "collateral count mismatch");
+        for (uint256 i; i < expected.collateralParams.length; ++i) {
+            CollateralParams memory a = actual.collateralParams[i];
+            CollateralParams memory e = expected.collateralParams[i];
+            require(a.token == e.token && a.lltv == e.lltv, "collateral parameters mismatch");
+            require(a.liquidationCursor == e.liquidationCursor && a.oracle == e.oracle, "collateral oracle mismatch");
+        }
+    }
+
+    function _verifyPolicy(MarketEconomicPolicy memory actual, MarketEconomicPolicy memory expected) internal pure {
+        require(actual.maxBuyTick == expected.maxBuyTick, "policy buy tick mismatch");
+        require(actual.minSellTick == expected.minSellTick, "policy sell tick mismatch");
+        require(actual.maxTenor == expected.maxTenor, "policy tenor mismatch");
+        require(actual.maxExpiryHorizon == expected.maxExpiryHorizon, "policy expiry mismatch");
+        require(
+            actual.maxContinuousFeePerSecondWad == expected.maxContinuousFeePerSecondWad,
+            "policy continuous fee mismatch"
+        );
+        require(actual.maxSettlementFeeWad == expected.maxSettlementFeeWad, "policy settlement fee mismatch");
+        require(actual.configured == expected.configured, "policy configured mismatch");
     }
 }

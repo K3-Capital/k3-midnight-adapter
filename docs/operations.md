@@ -50,7 +50,8 @@ sequence; do not commit `out/`, `out-pinned/`, or compiler caches.
 
 ## Preflight
 
-1. Confirm the approved stack base is `stack/05-exits-liquidity`.
+1. Confirm the approved stack base is `simplify/03-asynchronous-exits` at the
+   exact lead-approved commit recorded in the change record.
 2. Pin the target chain, USDC address, Vault V2 address, Morpho Blue address,
    Midnight address, and ratifier address in an operator change record.
 3. Confirm the Vault V2 asset is the same token used by the approved Blue market
@@ -83,6 +84,12 @@ forge script script/DeployPilot.s.sol --rpc-url "$RPC_URL" --broadcast
 The script verifies every constructor value and runtime code hash before the
 deployment is accepted for Vault registration. Query `parentVault`, `asset`,
 `midnight`, `morphoBlue`, `ratifier`, `approvedQuoter`, and both market IDs.
+
+The current build reports 18,991 runtime bytes and 23,335 creation bytes. The
+runtime delta versus the approved Stage 3 measurement (22,916 bytes) is -3,925
+bytes. `runtime_bytes * 200` is only the EVM runtime code-deposit component
+(3,798,200 gas); it is not total deployment gas. Total gas must be captured from
+the target chain transaction receipt or a chain-specific gas estimate.
 
 ## Initial configuration
 
@@ -119,7 +126,8 @@ Operator views include `realAssets`, `expectedSupplyAssets`,
 2. Lower the parent Vault adapter allocation cap to zero.
 3. Continue permissionless repayment collection.
 4. Withdraw available Blue liquidity.
-5. Publish a policy-valid reduce-only maker-sell root for the adapter's exact
+5. Have a Vault sentinel approve a policy-valid reduce-only maker-sell recovery
+   root for the adapter's exact
    position. An external taker fills the approved offer directly through
    Midnight `take`; verify proceeds were resupplied to Blue, then retry the
    Vault withdrawal in a later transaction.

@@ -31,22 +31,23 @@ There is no curator, quoter, or operator rescue path for primary assets.
 | Threat | Control and evidence |
 | --- | --- |
 | Compromised quoter drains pooled assets | Quoter has root-management only; adapter validates maker, callback, receiver, market, epoch, and economics. |
-| Malicious sell order redirects proceeds | `receiverIfMakerIsSeller == adapter`, `reduceOnly`, minimum exit tick, and callback caller checks. |
+| Malicious sell order redirects proceeds | `receiverIfMakerIsSeller == adapter`, `reduceOnly`, policy tick, and callback caller checks. |
 | Stale root after policy change | Root approvals are bound to non-zero `policyEpoch`; every accepted change increments the epoch. |
 | Curator instant risk expansion | Expansion selectors use exact calldata timelocks; sentinel can revoke pending data. |
 | Sentinel expands risk | Sentinel entry points only tighten policy, disable the pinned market, revoke quoters, or activate risk-off. The parent Vault adapter cap is the sole concentration boundary. |
 | Arbitrary Blue routing | Adapter stores one market and rejects callback routing data that is not empty. |
-| NAV double count during Blue/Midnight transitions | NAV is adapter cash plus expected Blue supply assets plus bounded conservative market book value; transition tests cover allocation, callbacks, repayment, and exits. |
+| NAV double count during Blue/Midnight transitions | Immediate liquidity is adapter cash plus currently withdrawable Blue assets; open Midnight face value is excluded until repayment or an asynchronous sell. |
 | Known protocol loss hidden in NAV | Callback and checkpoint synchronization reduces tracked claims/book value when Midnight or Blue state loses value. |
-| Illiquid withdrawal silently underpays | Normal withdrawal and safe-exit fallback require the exact requested asset amount or revert. |
-| Unbounded gas denial | The adapter has one immutable Midnight market, so `realAssets()` has no market loop; callers supply bounded repayment/exit arrays. |
+| Illiquid withdrawal silently underpays | Deallocation uses adapter cash first, withdraws only the shortfall from configured Blue, and reverts atomically if exact liquidity is unavailable. |
+| Synchronous exit reaches Midnight or arbitrary receiver | Deallocation decodes only the configured Blue market. Maker sells are separate, policy-validated operations with proceeds pinned to the adapter. |
 | Reentrancy during external protocol calls | State and caps are checked before transfers; callback entry points require Midnight; no generic external-call primitive exists. |
 | Allowance theft | Allowances are exact-reset for Midnight settlement; quoter is never a spender of adapter assets. |
 
 ## Residual risks
 
-- Synchronous withdrawals are best effort and can revert during a Blue liquidity
-  run; v1 does not promise 100% instant redemption.
+- Withdrawals are best effort and can revert during a Blue liquidity run; v1
+  does not promise 100% instant redemption. Operators recover liquidity through
+  repayment or a policy-valid asynchronous maker sell.
 - Midnight and Morpho Blue correctness, oracle/economic behavior, and availability
   remain external dependencies.
 - The local integration suite is deterministic and does not replace a fork or

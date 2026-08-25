@@ -9,7 +9,7 @@ import {IBuyCallback, ISellCallback} from "midnight/interfaces/ICallbacks.sol";
 import {IdLib} from "midnight/libraries/IdLib.sol";
 import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
 import {Market, CollateralParams, Offer} from "midnight/interfaces/IMidnight.sol";
-import {MarketEconomicPolicy, SafeExit} from "../../src/types/AdapterTypes.sol";
+import {MarketEconomicPolicy} from "../../src/types/AdapterTypes.sol";
 import {AdapterTestMarket} from "../utils/AdapterTestMarket.sol";
 
 contract ExitToken {
@@ -246,21 +246,6 @@ contract BlueMidnightAdapterExitTest is Test {
         assertEq(token.balanceOf(address(adapter)), 0);
     }
 
-    function testSafeExitPayloadIsVersionGated() public {
-        bytes memory malformed = abi.encode(uint8(2), new bytes[](0), uint256(0));
-        vm.expectRevert(BlueMidnightAdapter.InvalidExitPayload.selector);
-        vm.prank(address(vault));
-        adapter.deallocate(malformed, 1, bytes4(0), address(0));
-    }
-
-    function testExitLossLimitExpansionIsTimelocked() public {
-        bytes memory data = abi.encodeWithSelector(adapter.setExitLossLimit.selector, 10);
-        adapter.submit(data);
-        assertGt(adapter.executableAt(data), block.timestamp);
-        vm.expectRevert(BlueMidnightAdapter.TimelockNotExpired.selector);
-        adapter.setExitLossLimit(10);
-    }
-
     function testRiskOffRejectsBuyButAllowsRepaymentAndReducingSell() public {
         _seedCredit(100);
         token.mint(address(midnight), 25);
@@ -273,50 +258,19 @@ contract BlueMidnightAdapterExitTest is Test {
         vm.expectRevert(BlueMidnightAdapter.ExposureExceeded.selector);
         midnight.invokeBuy(address(adapter), midnightMarket, 1, 1);
 
-        uint256 collected = adapter.collectRepayments(25);
+        uint256 collected = adapter.collectRepayment(25);
         assertEq(collected, 25);
         assertEq(adapter.accounting().trackedCredit, 75);
-
-        token.mint(address(midnight), 75);
-        midnight.seed(midnightMarket, 75, 0, 75);
-        midnight.take(_offer(), hex"", 75, address(adapter), address(adapter), address(adapter), hex"");
-        assertEq(adapter.accounting().trackedCredit, 0);
     }
 
-    function testSafeExitSucceedsAfterMarketDisableAndReportsLoss() public {
-        _seedCredit(100);
-        _setExitLossLimit(20);
-        token.mint(address(midnight), 80);
-        midnight.seed(midnightMarket, 100, 0, 80);
-        vault.setSentinel(sentinel, true);
-        vm.prank(sentinel);
-        adapter.disableMarket();
-
-        SafeExit[] memory exits = new SafeExit[](1);
-        exits[0] = SafeExit(_offer(), hex"", 100);
-        bytes memory data = abi.encode(uint8(1), exits, uint256(20));
+    function testDeallocateUsesAdapterCashBeforeBlue() public {
+        token.mint(address(vault), 100);
         vm.prank(address(vault));
-        adapter.deallocate(data, 80, bytes4(0), address(0));
-
-        assertEq(adapter.accounting().trackedCredit, 0);
-        assertEq(token.balanceOf(address(adapter)), 80);
-    }
-
-    function testSafeExitRejectsLossAboveConfiguredLimitWithoutDrift() public {
-        _seedCredit(100);
-        _setExitLossLimit(10);
-        token.mint(address(midnight), 80);
-        midnight.seed(midnightMarket, 100, 0, 80);
-
-        SafeExit[] memory exits = new SafeExit[](1);
-        exits[0] = SafeExit(_offer(), hex"", 100);
-        bytes memory data = abi.encode(uint8(1), exits, uint256(10));
-        vm.expectRevert(BlueMidnightAdapter.ExitLossExceeded.selector);
+        token.transfer(address(adapter), 100);
         vm.prank(address(vault));
-        adapter.deallocate(data, 80, bytes4(0), address(0));
-
-        assertEq(adapter.accounting().trackedCredit, 100);
-        assertEq(token.balanceOf(address(adapter)), 0);
+        adapter.deallocate(abi.encode(market), 100, bytes4(0), address(0));
+        assertEq(token.balanceOf(address(adapter)), 100);
+        assertEq(adapter.expectedSupplyAssets(), 0);
     }
 
     function _seedCredit(uint256 assets) internal {
@@ -334,13 +288,6 @@ contract BlueMidnightAdapterExitTest is Test {
         token.transfer(address(adapter), assets);
         vm.prank(address(vault));
         adapter.allocate(abi.encode(market), assets, bytes4(0), address(0));
-    }
-
-    function _setExitLossLimit(uint256 limit) internal {
-        bytes memory data = abi.encodeWithSelector(adapter.setExitLossLimit.selector, limit);
-        adapter.submit(data);
-        vm.warp(adapter.executableAt(data));
-        adapter.setExitLossLimit(limit);
     }
 
     function _offer() internal view returns (Offer memory) {
@@ -363,13 +310,4 @@ contract BlueMidnightAdapterExitTest is Test {
         });
     }
 
-    function _markets(Market memory value) internal pure returns (Market[] memory values) {
-        values = new Market[](1);
-        values[0] = value;
-    }
-
-    function _units(uint256 value) internal pure returns (uint256[] memory values) {
-        values = new uint256[](1);
-        values[0] = value;
-    }
 }

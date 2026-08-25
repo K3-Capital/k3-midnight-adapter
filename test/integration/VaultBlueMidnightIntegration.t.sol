@@ -278,7 +278,7 @@ contract VaultBlueMidnightIntegrationTest is Test {
         token.approve(address(midnight), type(uint256).max);
         vm.prank(borrower);
         midnight.repay(midnightMarket, PARTIAL_UNITS, borrower, address(0), hex"");
-        adapter.collectRepayments(PARTIAL_UNITS);
+        adapter.collectRepayment(PARTIAL_UNITS);
         assertEq(adapter.accounting().trackedCredit, UNITS - PARTIAL_UNITS);
 
         _adapterCall(abi.encodeCall(adapter.setQuoter, (address(this), false)));
@@ -340,7 +340,7 @@ contract VaultBlueMidnightIntegrationTest is Test {
         token.approve(address(midnight), type(uint256).max);
         vm.prank(borrower);
         midnight.repay(midnightMarket, UNITS, borrower, address(0), hex"");
-        adapter.collectRepayments(UNITS);
+        adapter.collectRepayment(UNITS);
         assertEq(vault.convertToAssets(shares), priceBeforeFill);
 
         vm.prank(allocator);

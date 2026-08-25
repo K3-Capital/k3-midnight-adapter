@@ -131,26 +131,6 @@
   },
   {
     "inputs": [],
-    "name": "ExitLossExceeded",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "ExitMarketMismatch",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "ExitOfferInvalid",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "ExitPriceTooLow",
-    "type": "error"
-  },
-  {
-    "inputs": [],
     "name": "ExposureExceeded",
     "type": "error"
   },
@@ -167,11 +147,6 @@
   {
     "inputs": [],
     "name": "InvalidCallback",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidExitPayload",
     "type": "error"
   },
   {
@@ -551,37 +526,6 @@
       }
     ],
     "name": "Revoke",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "units",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "assets",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "loss",
-        "type": "uint256"
-      }
-    ],
-    "name": "SafeExitExecuted",
     "type": "event"
   },
   {
@@ -1048,7 +992,7 @@
         "type": "uint256"
       }
     ],
-    "name": "collectRepayments",
+    "name": "collectRepayment",
     "outputs": [
       {
         "internalType": "uint256",
@@ -1143,6 +1087,176 @@
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "components": [
+          {
+            "components": [
+              {
+                "internalType": "uint256",
+                "name": "chainId",
+                "type": "uint256"
+              },
+              {
+                "internalType": "address",
+                "name": "midnight",
+                "type": "address"
+              },
+              {
+                "internalType": "address",
+                "name": "loanToken",
+                "type": "address"
+              },
+              {
+                "components": [
+                  {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "lltv",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "liquidationCursor",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "address",
+                    "name": "oracle",
+                    "type": "address"
+                  }
+                ],
+                "internalType": "struct CollateralParams[]",
+                "name": "collateralParams",
+                "type": "tuple[]"
+              },
+              {
+                "internalType": "uint256",
+                "name": "maturity",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "rcfThreshold",
+                "type": "uint256"
+              },
+              {
+                "internalType": "address",
+                "name": "enterGate",
+                "type": "address"
+              },
+              {
+                "internalType": "address",
+                "name": "liquidatorGate",
+                "type": "address"
+              }
+            ],
+            "internalType": "struct Market",
+            "name": "market",
+            "type": "tuple"
+          },
+          {
+            "internalType": "bool",
+            "name": "buy",
+            "type": "bool"
+          },
+          {
+            "internalType": "address",
+            "name": "maker",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "start",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "expiry",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "tick",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "group",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "address",
+            "name": "callback",
+            "type": "address"
+          },
+          {
+            "internalType": "bytes",
+            "name": "callbackData",
+            "type": "bytes"
+          },
+          {
+            "internalType": "address",
+            "name": "receiverIfMakerIsSeller",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "ratifier",
+            "type": "address"
+          },
+          {
+            "internalType": "bool",
+            "name": "reduceOnly",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint128",
+            "name": "maxUnits",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint128",
+            "name": "maxAssets",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint256",
+            "name": "continuousFeeCap",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct Offer",
+        "name": "offer",
+        "type": "tuple"
+      },
+      {
+        "internalType": "bytes",
+        "name": "ratifierData",
+        "type": "bytes"
+      },
+      {
+        "internalType": "uint256",
+        "name": "units",
+        "type": "uint256"
+      }
+    ],
+    "name": "executeMakerSell",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "sellerAssets",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "expectedSupplyAssets",
     "outputs": [
@@ -1203,19 +1317,6 @@
       }
     ],
     "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "newLimit",
-        "type": "uint256"
-      }
-    ],
-    "name": "lowerExitLossLimit",
-    "outputs": [],
-    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1295,38 +1396,12 @@
   },
   {
     "inputs": [],
-    "name": "maxExitLossAssets",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
     "name": "midnight",
     "outputs": [
       {
         "internalType": "address",
         "name": "",
         "type": "address"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "minExitBuyTick",
-    "outputs": [
-      {
-        "internalType": "uint24",
-        "name": "",
-        "type": "uint24"
       }
     ],
     "stateMutability": "view",
@@ -1762,19 +1837,6 @@
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "newLimit",
-        "type": "uint256"
-      }
-    ],
-    "name": "setExitLossLimit",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
         "components": [
           {
             "internalType": "uint24",
@@ -1818,19 +1880,6 @@
       }
     ],
     "name": "setMarketEconomicPolicy",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint24",
-        "name": "newTick",
-        "type": "uint24"
-      }
-    ],
-    "name": "setMinExitBuyTick",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1912,19 +1961,6 @@
       }
     ],
     "name": "tightenMarketEconomicPolicy",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint24",
-        "name": "newTick",
-        "type": "uint24"
-      }
-    ],
-    "name": "tightenMinExitBuyTick",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

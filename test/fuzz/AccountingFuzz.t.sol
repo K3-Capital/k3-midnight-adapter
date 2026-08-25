@@ -30,7 +30,7 @@ contract AccountingFuzzStatefulTest is BlueMidnightAdapterAccountingTest {
                 token.mint(address(midnight), units);
                 midnight.setPosition(midnightId, uint128(available), midnight.pendingFee(midnightId));
                 midnight.setPosition(IdLib.toId(midnightMarket), uint128(available), midnight.pendingFee(midnightId));
-                adapter.collectRepayments(units);
+                adapter.collectRepayment(units);
             } else {
                 uint256 trackedAvailable = available;
                 uint256 units = bound(uint256(keccak256(abi.encode(seed, i, "sell"))), 1, trackedAvailable);

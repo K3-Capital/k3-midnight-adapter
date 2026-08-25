@@ -397,7 +397,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
         token.mint(address(midnight), 20);
         midnight.setPosition(midnightId, 70, 0);
         midnight.setPosition(IdLib.toId(midnightMarket), 70, 0);
-        adapter.collectRepayments(20);
+        adapter.collectRepayment(20);
         assertEq(adapter.accounting().trackedCredit, 50);
 
         midnight.takeMakerSell(adapter, midnightId, midnightMarket, 45, 50, 0);

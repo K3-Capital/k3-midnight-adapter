@@ -74,7 +74,7 @@ contract Stage6AdapterHandler is Test {
         if (units == 0) return;
         token.mint(address(midnight), units);
         midnight.seed(midnightMarket, credit, units, 0);
-        adapter.collectRepayments(units);
+        adapter.collectRepayment(units);
     }
 
     function sell(uint256 requested) external {

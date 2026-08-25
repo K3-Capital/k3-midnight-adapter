@@ -88,8 +88,8 @@ Configure the adapter through Vault V2's curator with the required timelocks:
 1. Set the single approved Morpho Blue market.
 2. Configure the pinned Midnight market's economic policy.
 3. Set the quoter and root limits; roots are epoch-bound.
-4. Exercise allocation, callback, repayment, safe-exit, and exact deallocation
-   paths on the deterministic local deployment.
+4. Exercise allocation, callback, repayment, asynchronous maker-sell, and exact
+   deallocation paths on the deterministic local deployment.
 5. Add the adapter to Vault V2 with the approved absolute and relative cap.
 
 The sentinel may only tighten policy, disable markets, revoke quoters, bump the
@@ -117,8 +117,9 @@ Operator views include `realAssets`, `expectedSupplyAssets`,
 2. Lower the parent Vault adapter allocation cap to zero.
 3. Continue permissionless repayment collection.
 4. Withdraw available Blue liquidity.
-5. Use only policy-valid safe exits that pin the adapter as receiver and remain
-   within the configured loss bound.
+5. Publish and execute a policy-valid reduce-only maker sell through
+   `executeMakerSell`; verify proceeds were resupplied to Blue, then retry the
+   Vault withdrawal in a later transaction.
 6. Remove the adapter from Vault V2 only after actual and tracked positions are
    zero.
 

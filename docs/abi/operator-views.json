@@ -5,7 +5,6 @@
     "blueAvailableLiquidity",
     "buyerAssetsBound",
     "marketAccounting",
-    "activeMarketIdsLength",
-    "activeMarketIdAt"
+    "pinnedMidnightMarketId"
   ]
 }

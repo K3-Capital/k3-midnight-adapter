@@ -20,6 +20,75 @@
         "internalType": "address",
         "name": "_ratifier",
         "type": "address"
+      },
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "chainId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "address",
+            "name": "midnight",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "loanToken",
+            "type": "address"
+          },
+          {
+            "components": [
+              {
+                "internalType": "address",
+                "name": "token",
+                "type": "address"
+              },
+              {
+                "internalType": "uint256",
+                "name": "lltv",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "liquidationCursor",
+                "type": "uint256"
+              },
+              {
+                "internalType": "address",
+                "name": "oracle",
+                "type": "address"
+              }
+            ],
+            "internalType": "struct CollateralParams[]",
+            "name": "collateralParams",
+            "type": "tuple[]"
+          },
+          {
+            "internalType": "uint256",
+            "name": "maturity",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "rcfThreshold",
+            "type": "uint256"
+          },
+          {
+            "internalType": "address",
+            "name": "enterGate",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "liquidatorGate",
+            "type": "address"
+          }
+        ],
+        "internalType": "struct Market",
+        "name": "_pinnedMidnightMarket",
+        "type": "tuple"
       }
     ],
     "stateMutability": "nonpayable",
@@ -33,11 +102,6 @@
   {
     "inputs": [],
     "name": "AccountingOverflow",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "ActiveMarketLimit",
     "type": "error"
   },
   {
@@ -83,11 +147,6 @@
   {
     "inputs": [],
     "name": "ExposureExceeded",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "ExposureLimit",
     "type": "error"
   },
   {
@@ -330,25 +389,6 @@
     "anonymous": false,
     "inputs": [
       {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "globalCap",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "marketCap",
-        "type": "uint256"
-      }
-    ],
-    "name": "ExposureCapsSet",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
         "indexed": true,
         "internalType": "bytes32",
         "name": "marketId",
@@ -418,37 +458,6 @@
       }
     ],
     "name": "MarketEconomicPolicySet",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "maxExposure",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "maxAssets",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "bool",
-        "name": "enabled",
-        "type": "bool"
-      }
-    ],
-    "name": "MarketPolicySet",
     "type": "event"
   },
   {
@@ -819,38 +828,6 @@
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "index",
-        "type": "uint256"
-      }
-    ],
-    "name": "activeMarketIdAt",
-    "outputs": [
-      {
-        "internalType": "bytes32",
-        "name": "",
-        "type": "bytes32"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "activeMarketIdsLength",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
     "inputs": [],
     "name": "adapterId",
     "outputs": [
@@ -1021,78 +998,9 @@
   {
     "inputs": [
       {
-        "components": [
-          {
-            "internalType": "uint256",
-            "name": "chainId",
-            "type": "uint256"
-          },
-          {
-            "internalType": "address",
-            "name": "midnight",
-            "type": "address"
-          },
-          {
-            "internalType": "address",
-            "name": "loanToken",
-            "type": "address"
-          },
-          {
-            "components": [
-              {
-                "internalType": "address",
-                "name": "token",
-                "type": "address"
-              },
-              {
-                "internalType": "uint256",
-                "name": "lltv",
-                "type": "uint256"
-              },
-              {
-                "internalType": "uint256",
-                "name": "liquidationCursor",
-                "type": "uint256"
-              },
-              {
-                "internalType": "address",
-                "name": "oracle",
-                "type": "address"
-              }
-            ],
-            "internalType": "struct CollateralParams[]",
-            "name": "collateralParams",
-            "type": "tuple[]"
-          },
-          {
-            "internalType": "uint256",
-            "name": "maturity",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "rcfThreshold",
-            "type": "uint256"
-          },
-          {
-            "internalType": "address",
-            "name": "enterGate",
-            "type": "address"
-          },
-          {
-            "internalType": "address",
-            "name": "liquidatorGate",
-            "type": "address"
-          }
-        ],
-        "internalType": "struct Market[]",
-        "name": "markets",
-        "type": "tuple[]"
-      },
-      {
-        "internalType": "uint256[]",
+        "internalType": "uint256",
         "name": "requestedUnits",
-        "type": "uint256[]"
+        "type": "uint256"
       }
     ],
     "name": "collectRepayments",
@@ -1164,13 +1072,7 @@
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      }
-    ],
+    "inputs": [],
     "name": "disableMarket",
     "outputs": [],
     "stateMutability": "nonpayable",
@@ -1222,19 +1124,6 @@
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "globalExposureCap",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
     "inputs": [
       {
         "internalType": "bytes4",
@@ -1250,25 +1139,6 @@
     "name": "increaseTimelock",
     "outputs": [],
     "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      }
-    ],
-    "name": "isActiveMarket",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -1299,37 +1169,6 @@
       }
     ],
     "name": "lowerExitLossLimit",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "globalCap",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "marketCap",
-        "type": "uint256"
-      }
-    ],
-    "name": "lowerExposureCaps",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "newMax",
-        "type": "uint256"
-      }
-    ],
-    "name": "lowerMaxActiveMarkets",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1381,32 +1220,7 @@
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      }
-    ],
-    "name": "marketAssetCap",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      }
-    ],
+    "inputs": [],
     "name": "marketEconomicPolicy",
     "outputs": [
       {
@@ -1449,13 +1263,7 @@
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      }
-    ],
+    "inputs": [],
     "name": "marketEnabled",
     "outputs": [
       {
@@ -1475,44 +1283,12 @@
         "type": "bytes32"
       }
     ],
-    "name": "marketExposureCap",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      }
-    ],
     "name": "marketKnown",
     "outputs": [
       {
         "internalType": "bool",
         "name": "",
         "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "maxActiveMarkets",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -1816,6 +1592,19 @@
   },
   {
     "inputs": [],
+    "name": "pinnedMidnightMarketId",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "policyEpoch",
     "outputs": [
       {
@@ -1851,19 +1640,6 @@
       }
     ],
     "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      }
-    ],
-    "name": "registerActiveMarket",
-    "outputs": [],
-    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1987,29 +1763,6 @@
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "globalCap",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "marketCap",
-        "type": "uint256"
-      }
-    ],
-    "name": "setExposureCaps",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      },
-      {
         "components": [
           {
             "internalType": "uint24",
@@ -2060,47 +1813,6 @@
   {
     "inputs": [
       {
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      },
-      {
-        "internalType": "uint256",
-        "name": "exposureCap",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "assetCap",
-        "type": "uint256"
-      },
-      {
-        "internalType": "bool",
-        "name": "enabled",
-        "type": "bool"
-      }
-    ],
-    "name": "setMarketPolicy",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "newMax",
-        "type": "uint256"
-      }
-    ],
-    "name": "setMaxActiveMarkets",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
         "internalType": "uint24",
         "name": "newTick",
         "type": "uint24"
@@ -2143,25 +1855,7 @@
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "targetExposureCap",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
     "inputs": [
-      {
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      },
       {
         "components": [
           {
@@ -2240,19 +1934,6 @@
       }
     ],
     "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes32",
-        "name": "marketId",
-        "type": "bytes32"
-      }
-    ],
-    "name": "unregisterActiveMarket",
-    "outputs": [],
-    "stateMutability": "nonpayable",
     "type": "function"
   }
 ]

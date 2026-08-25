@@ -136,7 +136,12 @@ contract VaultBlueMidnightIntegrationTest is Test {
         factory = new BlueMidnightAdapterFactory();
         adapter = BlueMidnightAdapter(
             factory.deploy(
-                keccak256("full-lifecycle"), address(vault), address(midnight), address(morpho), address(ratifier)
+                keccak256("full-lifecycle"),
+                address(vault),
+                address(midnight),
+                address(morpho),
+                address(ratifier),
+                midnightMarket
             )
         );
         vm.prank(address(adapter));
@@ -308,7 +313,12 @@ contract VaultBlueMidnightIntegrationTest is Test {
 
     function testFactoryPredictionMatchesRealDeployment() public view {
         address predicted = factory.predict(
-            keccak256("prediction"), address(vault), address(midnight), address(morpho), address(ratifier)
+            keccak256("prediction"),
+            address(vault),
+            address(midnight),
+            address(morpho),
+            address(ratifier),
+            midnightMarket
         );
         assertTrue(predicted != address(0));
     }

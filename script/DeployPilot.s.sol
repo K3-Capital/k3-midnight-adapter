@@ -3,6 +3,7 @@ pragma solidity 0.8.34;
 
 import {Script} from "forge-std/Script.sol";
 import {BlueMidnightAdapterFactory} from "../src/BlueMidnightAdapterFactory.sol";
+import {Market} from "midnight/interfaces/IMidnight.sol";
 
 /// @notice Deploys one pilot adapter from explicit environment configuration.
 /// @dev Addresses and salt are inputs, never committed deployment state.
@@ -14,9 +15,10 @@ contract DeployPilot is Script {
         address midnight = vm.envAddress("MIDNIGHT");
         address morphoBlue = vm.envAddress("MORPHO_BLUE");
         address ratifier = vm.envAddress("RATIFIER");
+        Market memory pinnedMidnightMarket = abi.decode(vm.envBytes("MIDNIGHT_MARKET"), (Market));
 
         vm.startBroadcast();
-        adapter = factory.deploy(salt, parentVault, midnight, morphoBlue, ratifier);
+        adapter = factory.deploy(salt, parentVault, midnight, morphoBlue, ratifier, pinnedMidnightMarket);
         vm.stopBroadcast();
     }
 }

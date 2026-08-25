@@ -2,6 +2,7 @@
 pragma solidity 0.8.34;
 
 import {BlueMidnightAdapter} from "./BlueMidnightAdapter.sol";
+import {Market} from "midnight/interfaces/IMidnight.sol";
 
 /// @title Blue Midnight adapter factory
 /// @notice Permissionless CREATE2 deployment for immutable adapter instances.
@@ -21,25 +22,35 @@ contract BlueMidnightAdapterFactory {
         address ratifier
     );
 
-    function deploy(bytes32 salt, address parentVault, address midnight, address morphoBlue, address ratifier)
-        external
-        returns (address adapter)
-    {
+    function deploy(
+        bytes32 salt,
+        address parentVault,
+        address midnight,
+        address morphoBlue,
+        address ratifier,
+        Market calldata pinnedMidnightMarket
+    ) external returns (address adapter) {
         if (salt == bytes32(0)) revert InvalidSalt();
-        adapter = predict(salt, parentVault, midnight, morphoBlue, ratifier);
+        adapter = predict(salt, parentVault, midnight, morphoBlue, ratifier, pinnedMidnightMarket);
         if (adapter.code.length != 0) revert AlreadyDeployed(adapter);
-        adapter = address(new BlueMidnightAdapter{salt: salt}(parentVault, midnight, morphoBlue, ratifier));
+        adapter = address(
+            new BlueMidnightAdapter{salt: salt}(parentVault, midnight, morphoBlue, ratifier, pinnedMidnightMarket)
+        );
         emit AdapterDeployed(adapter, salt, parentVault, midnight, morphoBlue, ratifier);
     }
 
-    function predict(bytes32 salt, address parentVault, address midnight, address morphoBlue, address ratifier)
-        public
-        view
-        returns (address)
-    {
+    function predict(
+        bytes32 salt,
+        address parentVault,
+        address midnight,
+        address morphoBlue,
+        address ratifier,
+        Market calldata pinnedMidnightMarket
+    ) public view returns (address) {
         bytes32 initCodeHash = keccak256(
             abi.encodePacked(
-                type(BlueMidnightAdapter).creationCode, abi.encode(parentVault, midnight, morphoBlue, ratifier)
+                type(BlueMidnightAdapter).creationCode,
+                abi.encode(parentVault, midnight, morphoBlue, ratifier, pinnedMidnightMarket)
             )
         );
         return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, initCodeHash)))));

@@ -108,7 +108,7 @@ Alert on:
 - roots that are close to expiry or invalidated by an epoch change.
 
 Operator views include `realAssets`, `expectedSupplyAssets`,
-`blueAvailableLiquidity`, `buyerAssetsBound`, `accounting`,
+`blueAvailableLiquidity`, `immediateLiquidity`, `buyerAssetsBound`, `accounting`,
 `pinnedMidnightMarketId`, and `pinnedMidnightMarketHash`.
 
 ## Risk-off and rollback
@@ -117,8 +117,9 @@ Operator views include `realAssets`, `expectedSupplyAssets`,
 2. Lower the parent Vault adapter allocation cap to zero.
 3. Continue permissionless repayment collection.
 4. Withdraw available Blue liquidity.
-5. Publish and execute a policy-valid reduce-only maker sell through
-   `executeMakerSell`; verify proceeds were resupplied to Blue, then retry the
+5. Publish a policy-valid reduce-only maker-sell root for the adapter's exact
+   position. An external taker fills the approved offer directly through
+   Midnight `take`; verify proceeds were resupplied to Blue, then retry the
    Vault withdrawal in a later transaction.
 6. Remove the adapter from Vault V2 only after actual and tracked positions are
    zero.

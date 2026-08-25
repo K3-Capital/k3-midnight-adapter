@@ -34,12 +34,12 @@ There is no curator, quoter, or operator rescue path for primary assets.
 | Malicious sell order redirects proceeds | `receiverIfMakerIsSeller == adapter`, `reduceOnly`, minimum exit tick, and callback caller checks. |
 | Stale root after policy change | Root approvals are bound to non-zero `policyEpoch`; every accepted change increments the epoch. |
 | Curator instant risk expansion | Expansion selectors use exact calldata timelocks; sentinel can revoke pending data. |
-| Sentinel expands risk | Sentinel entry points only lower caps, tighten policy, disable markets, revoke quoters, or activate risk-off. |
+| Sentinel expands risk | Sentinel entry points only tighten policy, disable the pinned market, revoke quoters, or activate risk-off. The parent Vault adapter cap is the sole concentration boundary. |
 | Arbitrary Blue routing | Adapter stores one market and rejects callback routing data that is not empty. |
 | NAV double count during Blue/Midnight transitions | NAV is adapter cash plus expected Blue supply assets plus bounded conservative market book value; transition tests cover allocation, callbacks, repayment, and exits. |
 | Known protocol loss hidden in NAV | Callback and checkpoint synchronization reduces tracked claims/book value when Midnight or Blue state loses value. |
 | Illiquid withdrawal silently underpays | Normal withdrawal and safe-exit fallback require the exact requested asset amount or revert. |
-| Unbounded gas denial | Active Midnight markets are indexed with O(1) membership and bounded by `maxActiveMarkets`; callers supply bounded repayment/exit arrays. |
+| Unbounded gas denial | The adapter has one immutable Midnight market, so `realAssets()` has no market loop; callers supply bounded repayment/exit arrays. |
 | Reentrancy during external protocol calls | State and caps are checked before transfers; callback entry points require Midnight; no generic external-call primitive exists. |
 | Allowance theft | Allowances are exact-reset for Midnight settlement; quoter is never a spender of adapter assets. |
 

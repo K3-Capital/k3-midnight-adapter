@@ -23,8 +23,8 @@ The checked artifacts cover `BlueMidnightAdapter`,
 `BlueMidnightAdapterFactory`, and `PolicySetterRatifier`, including their
 events/errors. `docs/abi/operator-views.json` records the required operator
 views: `realAssets`, `expectedSupplyAssets`, `blueAvailableLiquidity`,
-`buyerAssetsBound`, `marketAccounting`, `activeMarketIdsLength`, and
-`activeMarketIdAt`. The script rebuilds production sources with tests skipped,
+`buyerAssetsBound`, `marketAccounting`, `pinnedMidnightMarketId`, and
+`pinnedMidnightMarketHash`. The script rebuilds production sources with tests skipped,
 sorts ABI entries and keys, and fails on drift or a missing operator view.
 
 ## Clean-checkout validation
@@ -54,8 +54,9 @@ sequence; do not commit `out/`, `out-pinned/`, or compiler caches.
 1. Confirm the approved stack base is `stack/05-exits-liquidity`.
 2. Pin the target chain, USDC address, Vault V2 address, Morpho Blue address,
    Midnight address, and ratifier address in an operator change record.
-3. Confirm the Vault V2 asset is the same USDC used by the approved Blue market
-   and every enabled Midnight market.
+3. Confirm the Vault V2 asset is the same token used by the approved Blue market
+   and the one immutable Midnight market. The parent Vault adapter cap is the
+   sole concentration boundary; the adapter has no internal exposure cap.
 4. Deploy `BlueMidnightAdapterFactory` with `script/DeployFactory.s.sol`.
 5. Record the factory address and transaction hash in the change record. Do not
    commit broadcast directories or deployment state.
@@ -85,13 +86,11 @@ values before any Vault registry change.
 Configure the adapter through Vault V2's curator with the required timelocks:
 
 1. Set the single approved Morpho Blue market.
-2. Set conservative global and target exposure caps.
-3. Configure each exact Midnight market's economic policy.
-4. Enable each market only after its economic policy is configured.
-5. Set the quoter and root limits; roots are epoch-bound.
-6. Exercise allocation, callback, repayment, safe-exit, and exact deallocation
+2. Configure the pinned Midnight market's economic policy.
+3. Set the quoter and root limits; roots are epoch-bound.
+4. Exercise allocation, callback, repayment, safe-exit, and exact deallocation
    paths on the deterministic local deployment.
-7. Add the adapter to Vault V2 with low absolute and relative caps.
+5. Add the adapter to Vault V2 with the approved absolute and relative cap.
 
 The sentinel may only tighten policy, disable markets, revoke quoters, bump the
 risk-off epoch, and lower limits. Repayment collection remains available during
@@ -103,20 +102,19 @@ Alert on:
 
 - `PolicyEpochIncremented`, `QuoterSet`, `MarketPolicySet`, and risk-off events;
 - Blue liquidity and adapter supply assets;
-- aggregate and per-market Midnight exposure;
-- active market count versus `maxActiveMarkets`;
+- the parent Vault adapter allocation/cap;
 - book value, maturity claims, recognized losses, and realized P&L;
 - failed or reverted exact withdrawals;
 - roots that are close to expiry or invalidated by an epoch change.
 
 Operator views include `realAssets`, `expectedSupplyAssets`,
 `blueAvailableLiquidity`, `buyerAssetsBound`, `marketAccounting`,
-`activeMarketIdsLength`, and `activeMarketIdAt`.
+`pinnedMidnightMarketId`, and `pinnedMidnightMarketHash`.
 
 ## Risk-off and rollback
 
 1. Revoke the quoter and call `riskOff` with a recorded reason.
-2. Disable new Midnight markets and lower Vault allocation caps to zero.
+2. Lower the parent Vault adapter allocation cap to zero.
 3. Continue permissionless repayment collection.
 4. Withdraw available Blue liquidity.
 5. Use only policy-valid safe exits that pin the adapter as receiver and remain

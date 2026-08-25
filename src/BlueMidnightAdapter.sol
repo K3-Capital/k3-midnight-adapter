@@ -20,6 +20,7 @@ import {CALLBACK_SUCCESS, MAX_CONTINUOUS_FEE, MAX_SETTLEMENT_FEE_360_DAYS} from 
 import {MAX_TICK} from "midnight/libraries/TickLib.sol";
 import {IdLib} from "midnight/libraries/IdLib.sol";
 import {HashLib} from "midnight/ratifiers/libraries/HashLib.sol";
+import {RiskIdLib} from "./libraries/RiskIdLib.sol";
 
 /// @title Blue Midnight adapter core
 /// @notice The Stage 3, single-market productive sleeve for a Vault V2 adapter.
@@ -93,6 +94,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     bytes4 internal constant DECREASE_TIMELOCK_SELECTOR = bytes4(keccak256("decreaseTimelock(bytes4,uint256)"));
     MidnightMarket internal pinnedMidnightMarket;
     bytes32 public immutable pinnedMidnightMarketId;
+    bytes32 public immutable pinnedMidnightMarketHash;
     MarketAccounting internal accounting;
     bool public marketEnabled;
     MarketEconomicPolicy public marketEconomicPolicy;
@@ -111,6 +113,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (
             _parentVault == address(0) || _midnight == address(0) || _morphoBlue == address(0)
                 || _pinnedMidnightMarket.midnight != _midnight || _pinnedMidnightMarket.loanToken == address(0)
+                || _pinnedMidnightMarket.loanToken != IVaultV2(_parentVault).asset()
         ) revert InvalidValue();
         factory = msg.sender;
         parentVault = _parentVault;
@@ -119,8 +122,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         ratifier = _ratifier;
         pinnedMidnightMarket = _pinnedMidnightMarket;
         pinnedMidnightMarketId = IdLib.toId(_pinnedMidnightMarket);
+        pinnedMidnightMarketHash = HashLib.hashMarket(_pinnedMidnightMarket);
         asset = IVaultV2(_parentVault).asset();
-        adapterId = keccak256(abi.encode("this", address(this)));
+        adapterId = RiskIdLib.adapter(address(this));
         policyEpoch = 1;
 
         timelock[bytes4(keccak256("setBlueMarket((address,address,address,address,uint256))"))] = 2 days;
@@ -384,21 +388,21 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     /// @notice Permissionless collection of available Midnight repayments.
     /// @dev This path is intentionally available while risk-off is active.
     function collectRepayments(uint256 requestedUnits) external returns (uint256 totalAssets) {
-        if (!marketKnown(pinnedMidnightMarketId)) revert InvalidMarket();
+        if (!marketKnown(pinnedMidnightMarketHash)) revert InvalidMarket();
         uint256 units = requestedUnits;
         uint256 available = IMidnight(midnight).withdrawable(pinnedMidnightMarketId);
         if (units == 0 || units > available) units = available;
         if (units == 0) return 0;
-        _checkpoint(pinnedMidnightMarketId, pinnedMidnightMarket, 0, 0);
+        _checkpoint(pinnedMidnightMarketHash, pinnedMidnightMarket, 0, 0);
         uint256 beforeBalance = IERC20(asset).balanceOf(address(this));
         IMidnight(midnight).withdraw(pinnedMidnightMarket, units, address(this), address(this));
         uint256 received = IERC20(asset).balanceOf(address(this)) - beforeBalance;
         if (received == 0) revert RepaymentUnavailable();
-        _reduceCreditAfterRecovery(pinnedMidnightMarketId, units);
+        _reduceCreditAfterRecovery(pinnedMidnightMarketHash, units);
         (uint256 supplied,) = IMorpho(morphoBlue).supply(blue.market, received, 0, address(this), hex"");
         if (supplied != received) revert InvalidCallback();
         totalAssets += received;
-        emit RepaymentCollected(pinnedMidnightMarketId, units, received);
+        emit RepaymentCollected(pinnedMidnightMarketHash, units, received);
         totalAssets = received;
     }
 
@@ -432,7 +436,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     }
 
     function buyerAssetsBound(bytes32 midnightMarketId) public view returns (uint256) {
-        if (midnightMarketId != pinnedMidnightMarketId || riskOffActive) return 0;
+        if (midnightMarketId != pinnedMidnightMarketHash || riskOffActive) return 0;
         uint256 bound = IVaultV2(parentVault).allocation(adapterId);
         uint256 adapterLiquidity = expectedSupplyAssets();
         if (bound > adapterLiquidity) bound = adapterLiquidity;
@@ -442,7 +446,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     }
 
     function marketAccounting(bytes32 marketId) external view returns (MarketAccounting memory) {
-        if (marketId != pinnedMidnightMarketId) revert InvalidMarket();
+        if (marketId != pinnedMidnightMarketHash) revert InvalidMarket();
         return accounting;
     }
 
@@ -457,8 +461,10 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         bytes32 marketId = HashLib.hashMarket(offer.market);
         bytes32 protocolMarketId = IdLib.toId(offer.market);
         MarketEconomicPolicy memory policy = marketEconomicPolicy;
-        if (marketId != pinnedMidnightMarketId || !marketEnabled || !policy.configured || offer.start > block.timestamp)
-        {
+        if (
+            marketId != pinnedMidnightMarketHash || !marketEnabled || !policy.configured
+                || offer.start > block.timestamp
+        ) {
             return false;
         }
         if (
@@ -483,7 +489,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         }
         if (offer.buy) {
             return offer.maxAssets > 0 && offer.maxUnits == 0
-                && offer.maxAssets <= buyerAssetsBound(pinnedMidnightMarketId) && offer.tick <= policy.maxBuyTick
+                && offer.maxAssets <= buyerAssetsBound(pinnedMidnightMarketHash) && offer.tick <= policy.maxBuyTick
                 && offer.receiverIfMakerIsSeller == address(0) && !offer.reduceOnly && offer.callbackData.length == 0;
         }
         return offer.maxAssets == 0 && offer.maxUnits > 0 && offer.tick >= policy.minSellTick
@@ -512,7 +518,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         if (msg.sender != midnight || buyer != address(this)) revert Unauthorized();
         bytes32 marketId = HashLib.hashMarket(market);
         if (
-            id != IdLib.toId(market) || marketId != pinnedMidnightMarketId || !marketEnabled
+            id != IdLib.toId(market) || marketId != pinnedMidnightMarketHash || !marketEnabled
                 || market.midnight != midnight || market.loanToken != asset
         ) {
             revert InvalidOffer();
@@ -554,7 +560,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         }
         bytes32 marketId = HashLib.hashMarket(market);
         if (
-            id != IdLib.toId(market) || marketId != pinnedMidnightMarketId || (!marketEnabled && !safeExitInProgress)
+            id != IdLib.toId(market) || marketId != pinnedMidnightMarketHash || (!marketEnabled && !safeExitInProgress)
                 || market.loanToken != asset
         ) {
             revert InvalidOffer();
@@ -620,11 +626,11 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     }
 
     function marketKnown(bytes32 marketId) public view returns (bool) {
-        return marketId == pinnedMidnightMarketId && (marketEnabled || accounting.trackedCredit != 0);
+        return marketId == pinnedMidnightMarketHash && (marketEnabled || accounting.trackedCredit != 0);
     }
 
     function _reduceCreditAfterRecovery(bytes32 id, uint256 units) internal {
-        if (id != pinnedMidnightMarketId) revert InvalidMarket();
+        if (id != pinnedMidnightMarketHash) revert InvalidMarket();
         MarketAccounting storage a = accounting;
         if (units > a.trackedCredit || a.trackedCredit == 0) revert InsufficientCredit();
         uint256 oldCredit = a.trackedCredit;
@@ -637,7 +643,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         }
     }
 
-    function _checkpoint(bytes32 id, MidnightMarket memory market, uint256 feeDecrease, uint256 soldUnits)
+    function _checkpoint(bytes32, MidnightMarket memory market, uint256 feeDecrease, uint256 soldUnits)
         internal
         returns (uint256 postSaleClaim)
     {
@@ -690,10 +696,11 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     }
 
     function _ids() internal view returns (bytes32[] memory result) {
-        result = new bytes32[](3);
+        result = new bytes32[](4);
         result[0] = adapterId;
-        result[1] = keccak256(abi.encode("morpho-blue", blue.marketId));
-        result[2] = keccak256(abi.encode("midnight", midnight));
+        result[1] = RiskIdLib.blue(blue.marketId);
+        result[2] = RiskIdLib.midnight(midnight);
+        result[3] = RiskIdLib.midnightMarket(pinnedMidnightMarketHash);
     }
 
     function _bumpEpoch(bytes32 reason) internal {

@@ -81,6 +81,19 @@ contract BlueMidnightAdapterFactoryTest is Test {
         );
     }
 
+    function testPinnedLoanTokenMustMatchParentVaultAsset() public {
+        ExitToken otherToken = new ExitToken();
+        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
+        factory.deploy(
+            keccak256("mismatched-loan-token"),
+            address(vault),
+            address(4),
+            address(morpho),
+            address(5),
+            AdapterTestMarket.make(address(4), address(otherToken))
+        );
+    }
+
     function testDuplicateDeploymentRejected() public {
         bytes32 salt = keccak256("duplicate");
         factory.deploy(

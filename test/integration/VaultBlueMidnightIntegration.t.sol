@@ -92,7 +92,6 @@ contract VaultBlueMidnightIntegrationTest is Test {
     address internal allocator;
 
     function setUp() public {
-        vm.skip(true);
         borrower = makeAddr("borrower");
         lender = makeAddr("lender");
         depositor = makeAddr("depositor");
@@ -185,15 +184,19 @@ contract VaultBlueMidnightIntegrationTest is Test {
         bytes32 adapterId = keccak256(abi.encode("this", address(adapter)));
         bytes32 blueId = keccak256(abi.encode("morpho-blue", blueMarket.id()));
         bytes32 midnightId = keccak256(abi.encode("midnight", address(midnight)));
+        bytes32 midnightMarketRiskId = keccak256(abi.encode("midnight-market", midnightMarketId));
         _vaultCall(abi.encodeCall(vault.increaseAbsoluteCap, (abi.encode("this", address(adapter)), ASSETS)));
         _vaultCall(abi.encodeCall(vault.increaseRelativeCap, (abi.encode("this", address(adapter)), 1e18)));
         _vaultCall(abi.encodeCall(vault.increaseAbsoluteCap, (abi.encode("morpho-blue", blueMarket.id()), ASSETS)));
         _vaultCall(abi.encodeCall(vault.increaseRelativeCap, (abi.encode("morpho-blue", blueMarket.id()), 1e18)));
         _vaultCall(abi.encodeCall(vault.increaseAbsoluteCap, (abi.encode("midnight", address(midnight)), ASSETS)));
         _vaultCall(abi.encodeCall(vault.increaseRelativeCap, (abi.encode("midnight", address(midnight)), 1e18)));
+        _vaultCall(abi.encodeCall(vault.increaseAbsoluteCap, (abi.encode("midnight-market", midnightMarketId), ASSETS)));
+        _vaultCall(abi.encodeCall(vault.increaseRelativeCap, (abi.encode("midnight-market", midnightMarketId), 1e18)));
         assertEq(adapterId, keccak256(abi.encode("this", address(adapter))));
         assertEq(blueId, keccak256(abi.encode("morpho-blue", blueMarket.id())));
         assertEq(midnightId, keccak256(abi.encode("midnight", address(midnight))));
+        assertEq(midnightMarketRiskId, keccak256(abi.encode("midnight-market", midnightMarketId)));
     }
 
     function _adapterCall(bytes memory data) internal {
@@ -317,5 +320,12 @@ contract VaultBlueMidnightIntegrationTest is Test {
             midnightMarket
         );
         assertTrue(predicted != address(0));
+    }
+
+    function testOtherwiseIdenticalOtherMarketIsRejected() public view {
+        Offer memory offer = _buyOffer();
+        offer.market.maturity += 1;
+        assertFalse(adapter.acceptsOffer(offer));
+        assertTrue(HashLib.hashMarket(offer.market) != adapter.pinnedMidnightMarketHash());
     }
 }

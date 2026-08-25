@@ -97,7 +97,7 @@ Vault V2 invokes `allocate(bytes,uint256,bytes4,address)`, `deallocate(bytes,uin
 - Immutable `parentVault` on the adapter.
 - Sole caller of `allocate` and `deallocate`.
 - Owns the economic claim on every adapter asset.
-- Uses adapter and risk-factor caps as an outer allocation bound.[5]
+- Uses the parent Vault adapter cap as the sole concentration boundary.[5]
 
 ### 6.2 Vault owner
 
@@ -112,11 +112,10 @@ May:
 
 - submit timelocked policy expansions;
 - activate executable policy changes;
-- enable exact Midnight market IDs;
-- configure market exposure and offer limits;
+- configure the pinned market's economics and offer limits;
 - configure the single Morpho Blue idle market;
 - appoint and revoke quoter addresses;
-- configure bounded market-count and global exposure limits.
+
 
 Must not:
 
@@ -290,10 +289,10 @@ Return:
 ```text
 adapter USDC balance
 + expected Morpho Blue supply assets owned by adapter
-+ amortized book value of bounded active Midnight markets
++ conservative book value for the one immutable pinned Midnight market
 ```
 
-The method must be view-only, bounded by `maxActiveMarkets`, and explicit about upstream reverts. Vault V2 relies on `realAssets()` during interest accrual; an unbounded or reverting implementation can block vault operations.
+The method must be view-only and explicit about upstream reverts. There is no active-market loop: the adapter is immutable to one exact Midnight market. Vault V2 relies on `realAssets()` during interest accrual; an unbounded or reverting implementation can block vault operations.
 
 ### 9.3 Risk IDs
 
@@ -302,9 +301,9 @@ Return at minimum:
 - adapter instance ID;
 - Morpho Blue idle-market ID;
 - Midnight protocol/strategy ID;
-- each active Midnight market or configured risk-bucket ID when allocation attribution can be kept correct.
+- exact pinned Midnight market risk ID derived from its EIP-712 market hash.
 
-Stage 1 must validate how Vault V2 caps and allocation changes behave when value moves internally from Blue to Midnight without a parent-vault `allocate` call. Adapter-local per-market caps remain mandatory even if Vault V2 cannot represent every internal movement as a separate risk ID.
+The parent Vault adapter cap is the sole concentration boundary. The adapter must return the exact pinned-market risk ID so Vault V2 can attribute the configured sleeve without any internal per-market cap.
 
 ## 10. Morpho Blue idle-liquidity sleeve
 
@@ -322,13 +321,12 @@ The stock Blue callback decodes quoter-provided `MarketParams` and checks only l
 
 ### 10.2 Availability bound
 
-Expose `buyerAssetsBound(midnightMarketId)` or equivalent returning the minimum of:
+Expose `buyerAssetsBound(pinnedMidnightMarketHash)` or equivalent returning the minimum of:
 
 - adapter's expected Blue supply assets;
 - current Blue market liquidity;
 - actual loan-token balance held by Morpho Blue;
-- remaining adapter-wide Midnight exposure capacity;
-- remaining target-market exposure capacity.
+- the parent Vault allocation to this adapter.
 
 The upstream Blue callback computes the first three quantities and deliberately treats routing information as potentially stale.
 
@@ -491,12 +489,11 @@ Do not defer known losses behind Vault V2 `maxRate`; `maxRate` is an outer posit
 
 Use expected Morpho Blue balances and adapter-owned supply shares. Recognize Blue interest and Blue bad-debt/loss effects in current supply assets.
 
-### 13.5 Active-market bound
+### 13.5 Single-market concentration boundary
 
-- Maintain an indexed active-market set with O(1) membership.
-- Remove markets when tracked claim and actual position are zero.
-- Enforce curator-configured `maxActiveMarkets` with an immutable hard maximum.
-- No user-triggered path loops over depositors or an unbounded market list.
+- Store one exact Midnight market and both its protocol ID and EIP-712 hash.
+- Return its deterministic risk ID alongside the adapter and Blue IDs.
+- Do not recreate an adapter-local exposure cap; Vault V2's adapter allocation/cap is the sole concentration boundary.
 
 ## 14. Timelocks, policy epochs, and emergency controls
 
@@ -504,13 +501,11 @@ Model adapter timelocks after `MorphoMarketV1AdapterV2`: selector-specific timel
 
 ### Timelocked risk expansions
 
-- enable new Midnight market;
 - configure/change Blue market;
-- increase global/per-market exposure;
 - increase root notional/lifetime;
 - loosen rate or exit-price limits;
 - extend tenor/maturity bounds;
-- increase active-market maximum;
+
 - change ratifier, only if mutability is retained.
 
 ### Immediate risk reductions

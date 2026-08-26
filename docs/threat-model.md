@@ -8,9 +8,10 @@ deallocate. Morpho Blue and Midnight are external protocols whose pinned
 interfaces and callback ordering are assumptions that must be checked again
 when dependencies change.
 
-The constructor pins the Blue market, Midnight market, economic policy, ratifier,
-and hot root-approver EOA. There is no generic governance-dispatch or custom
-deployment surface.
+The constructor pins the Blue market, Midnight market, economic policy, and
+ratifier, and initializes the hot root-approver EOA. The curator may rotate that
+approver through the dedicated setter. There is no generic governance-dispatch
+or custom deployment surface.
 Immutable configuration expansion requires deploying a replacement adapter and
 registering/capping it through Vault V2 governance. The sentinel can reduce risk
 immediately but cannot expand it. The curator may rotate the root approver; each

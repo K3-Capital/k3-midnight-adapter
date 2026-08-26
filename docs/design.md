@@ -61,7 +61,7 @@ The operator views are `realAssets`, `expectedSupplyAssets`,
 
 - The parent Vault owns the economic claim and controls allocation/deallocation.
 - Vault governance adds and caps the adapter; the cap is the exposure boundary.
-|  The curator alone can change the three live policy values in either direction and rotate the root approver;
+- The curator alone can change the three live policy values in either direction and rotate the root approver;
   every accepted change increments the epoch and invalidates prior roots. The
   hot root approver can approve roots only before pause and can revoke roots after
   pause, but cannot set policy or move assets.

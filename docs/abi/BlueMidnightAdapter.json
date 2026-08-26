@@ -468,11 +468,23 @@
       {
         "indexed": true,
         "internalType": "address",
+        "name": "previousRootApprover",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
         "name": "rootApprover",
         "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint64",
+        "name": "epoch",
+        "type": "uint64"
       }
     ],
-    "name": "RootApproverRevoked",
+    "name": "RootApproverUpdated",
     "type": "event"
   },
   {
@@ -1506,6 +1518,19 @@
       }
     ],
     "name": "setMinSellTick",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "value",
+        "type": "address"
+      }
+    ],
+    "name": "setRootApprover",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

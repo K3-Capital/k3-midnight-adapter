@@ -132,6 +132,20 @@ contract BlueMidnightAdapterImmutableTest is Test {
         adapter.setMaxExpiryHorizon(20 days);
         assertEq(adapter.policyEpoch(), ++epoch);
 
+        address replacement = address(0x401);
+        adapter.setRootApprover(replacement);
+        assertEq(adapter.rootApprover(), replacement);
+        assertEq(adapter.policyEpoch(), ++epoch);
+        bytes32 replacementRoot = keccak256("replacement-root");
+        vm.prank(replacement);
+        adapter.approveRoot(replacementRoot);
+        assertTrue(ratifier.approved(address(adapter), replacementRoot));
+        vm.prank(QUOTER);
+        vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
+        adapter.setRootApprover(QUOTER);
+        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
+        adapter.setRootApprover(replacement);
+
         vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
         adapter.setMaxExpiryHorizon(0);
         vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);

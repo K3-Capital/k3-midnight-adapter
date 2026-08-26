@@ -72,8 +72,8 @@ Run the gate from a clean checkout; its `out/` output is disposable and ignored.
 3. Confirm the Vault V2 asset is the same token used by the approved Blue market
    and the one immutable Midnight market. The parent Vault adapter cap is the
    sole concentration boundary; the adapter has no internal exposure cap.
-4. Encode the exact Blue market, Midnight market, economic policy, and approved
-   quoter identity; record the expected runtime code hash.
+4. Encode the exact Blue market, Midnight market, economic policy, and initial
+   root-approver identity; record the expected runtime code hash.
 5. Deploy directly with `script/DeployPilot.s.sol`. Do not commit broadcast
    directories or deployment state.
 
@@ -91,7 +91,7 @@ export MORPHO_BLUE=0x...
 export RATIFIER=0x...
 export MIDNIGHT_MARKET=0x...
 export ECONOMIC_POLICY=0x...
-export APPROVED_QUOTER=0x...
+export ROOT_APPROVER=0x...
 export EXPECTED_RUNTIME_CODE_HASH=0x...
 forge script script/DeployPilot.s.sol --rpc-url "$RPC_URL" --broadcast
 ```
@@ -100,16 +100,17 @@ The script verifies every constructor value and runtime code hash before the
 deployment is accepted for Vault registration. Query `parentVault`, `asset`,
 `midnight`, `morphoBlue`, `ratifier`, `rootApprover`, and both market IDs.
 
-The root approver EOA can only relay root approval/revocation. Safe-administered
-policy setters control `maxBuyTick`, `minSellTick`, and `maxExpiryHorizon`; each
-accepted change increments the policy epoch and invalidates prior roots. The
-sentinel's `pauseNewExposure` is monotonic: it stops new buys, approvals, and
-allocation while preserving exits and recovery.
+The root approver EOA can only relay root approval/revocation. The curator may
+replace that EOA through `setRootApprover`; the update increments the policy
+epoch and invalidates prior roots. Safe-administered policy setters control
+`maxBuyTick`, `minSellTick`, and `maxExpiryHorizon`; each accepted change also
+increments the policy epoch. The sentinel's `pauseNewExposure` is monotonic: it
+stops new buys, approvals, and allocation while preserving exits and recovery.
 
-The current build reports 16,940 runtime bytes and 20,799 creation bytes. The
-runtime delta versus the approved Stage 3 measurement (18,991 bytes) is -2,051
+The current build reports 17,251 runtime bytes and 21,130 creation bytes. The
+runtime delta versus the approved Stage 3 measurement (18,991 bytes) is -1,740
 bytes. `runtime_bytes * 200` is only the EVM runtime code-deposit component
-(3,388,000 gas). The reproducible local direct-CREATE fixture is:
+(3,450,200 gas). The reproducible local direct-CREATE fixture is:
 
 ```sh
 forge test --match-path test/unit/DeployPilot.t.sol \
@@ -140,7 +141,7 @@ Repayment collection remains available during the exposure pause.
 
 Alert on:
 
-- `PolicyEpochIncremented`, `RootApproverRevoked`, `MaxBuyTickUpdated`,
+- `PolicyEpochIncremented`, `RootApproverUpdated`, `MaxBuyTickUpdated`,
   `MinSellTickUpdated`, `MaxExpiryHorizonUpdated`, and `NewExposurePaused` events;
 - Blue liquidity and adapter supply assets;
 - the parent Vault adapter allocation/cap;
@@ -154,7 +155,7 @@ Operator views include `realAssets`, `expectedSupplyAssets`,
 
 ## Risk-off and rollback
 
-1. Revoke the quoter and call `riskOff` with a recorded reason.
+1. Call `pauseNewExposure` with a recorded reason.
 2. Lower the parent Vault adapter allocation cap to zero.
 3. Continue permissionless repayment collection.
 4. Withdraw available Blue liquidity.

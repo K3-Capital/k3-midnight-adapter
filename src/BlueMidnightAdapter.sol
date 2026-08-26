@@ -43,7 +43,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     error AccountingOverflow();
     error RepaymentUnavailable();
 
-    event RootApproverRevoked(address indexed rootApprover);
+    event RootApproverUpdated(address indexed previousRootApprover, address indexed rootApprover, uint64 indexed epoch);
     event RecoveryRootApproved(bytes32 indexed root, uint64 indexed epoch);
     event PolicyEpochIncremented(uint64 indexed epoch, bytes32 reason);
 
@@ -75,7 +75,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     // Exactly one immutable Midnight market is configured, so accounting is scalar.
     MarketAccounting internal accountingState;
     MarketEconomicPolicy internal economicPolicy;
-    address public immutable rootApprover;
+    address public rootApprover;
 
     constructor(
         address _parentVault,
@@ -162,6 +162,14 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         (bool success,) =
             ratifier.call(abi.encodeWithSignature("setRoot(address,bytes32,bool)", address(this), root, false));
         if (!success) revert InvalidCallback();
+    }
+
+    function setRootApprover(address value) external onlyCurator {
+        if (value == address(0) || value == rootApprover) revert InvalidValue();
+        address previous = rootApprover;
+        rootApprover = value;
+        _bumpEpoch("root-approver");
+        emit RootApproverUpdated(previous, value, policyEpoch);
     }
 
     /// @notice Allows the curator to change a configured market policy value.
@@ -256,7 +264,6 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         _reduceCreditAfterRecovery(pinnedMidnightMarketHash, units);
         (uint256 supplied,) = IMorpho(morphoBlue).supply(blue.market, received, 0, address(this), hex"");
         if (supplied != received) revert InvalidCallback();
-        totalAssets += received;
         emit RepaymentCollected(pinnedMidnightMarketHash, units, received);
         totalAssets = received;
     }

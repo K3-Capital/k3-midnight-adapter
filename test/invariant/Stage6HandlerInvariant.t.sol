@@ -49,14 +49,14 @@ contract Stage6AdapterHandler is Test {
         vm.prank(address(vault));
         token.transfer(address(adapter), assets);
         vm.prank(address(vault));
-        adapter.allocate(abi.encode(blueMarket), assets, bytes4(0), address(0));
+        adapter.allocate(hex"", assets, bytes4(0), address(0));
     }
 
     function deallocate(uint256 requested) external {
         uint256 available = adapter.expectedSupplyAssets();
         uint256 assets = available == 0 ? 0 : requested % (available + 1);
         vm.prank(address(vault));
-        adapter.deallocate(abi.encode(blueMarket), assets, bytes4(0), address(0));
+        adapter.deallocate(hex"", assets, bytes4(0), address(0));
     }
 
     function buy(uint256 requested) external {

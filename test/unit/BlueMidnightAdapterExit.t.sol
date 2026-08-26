@@ -233,7 +233,7 @@ contract BlueMidnightAdapterExitTest is Test {
         vm.prank(address(vault));
         token.transfer(address(adapter), 100);
         vm.prank(address(vault));
-        adapter.allocate(abi.encode(market), 100, bytes4(0), address(0));
+        adapter.allocate(hex"", 100, bytes4(0), address(0));
         assertEq(adapter.expectedSupplyAssets(), 100);
 
         vault.setSentinel(sentinel, true);
@@ -241,7 +241,7 @@ contract BlueMidnightAdapterExitTest is Test {
         adapter.pauseNewExposure(bytes32("incident"));
 
         vm.prank(address(vault));
-        adapter.deallocate(abi.encode(market), 100, bytes4(0), address(0));
+        adapter.deallocate(hex"", 100, bytes4(0), address(0));
         assertEq(token.balanceOf(address(adapter)), 100);
         assertTrue(adapter.newExposurePaused());
     }
@@ -251,12 +251,12 @@ contract BlueMidnightAdapterExitTest is Test {
         vm.prank(address(vault));
         token.transfer(address(adapter), 100);
         vm.prank(address(vault));
-        adapter.allocate(abi.encode(market), 100, bytes4(0), address(0));
+        adapter.allocate(hex"", 100, bytes4(0), address(0));
         uint256 beforeSupply = adapter.expectedSupplyAssets();
 
         vm.expectRevert();
         vm.prank(address(vault));
-        adapter.deallocate(abi.encode(market), 101, bytes4(0), address(0));
+        adapter.deallocate(hex"", 101, bytes4(0), address(0));
         assertEq(adapter.expectedSupplyAssets(), beforeSupply);
         assertEq(token.balanceOf(address(adapter)), 0);
     }
@@ -299,7 +299,7 @@ contract BlueMidnightAdapterExitTest is Test {
         vm.prank(address(vault));
         token.transfer(address(adapter), 100);
         vm.prank(address(vault));
-        adapter.deallocate(abi.encode(market), 100, bytes4(0), address(0));
+        adapter.deallocate(hex"", 100, bytes4(0), address(0));
         assertEq(token.balanceOf(address(adapter)), 100);
         assertEq(adapter.expectedSupplyAssets(), 0);
     }
@@ -309,7 +309,7 @@ contract BlueMidnightAdapterExitTest is Test {
         vm.prank(address(vault));
         token.transfer(address(adapter), assets);
         vm.prank(address(vault));
-        adapter.allocate(abi.encode(market), assets, bytes4(0), address(0));
+        adapter.allocate(hex"", assets, bytes4(0), address(0));
         midnight.invokeBuy(address(adapter), midnightMarket, assets, assets);
     }
 
@@ -318,7 +318,7 @@ contract BlueMidnightAdapterExitTest is Test {
         vm.prank(address(vault));
         token.transfer(address(adapter), assets);
         vm.prank(address(vault));
-        adapter.allocate(abi.encode(market), assets, bytes4(0), address(0));
+        adapter.allocate(hex"", assets, bytes4(0), address(0));
     }
 
     function _offer() internal view returns (Offer memory) {

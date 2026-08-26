@@ -208,14 +208,12 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         onlyParentVault
         returns (bytes32[] memory ids, int256 change)
     {
-        if (data.length == 0) revert InvalidMarket();
+        if (data.length != 0) revert UnsupportedData();
         if (newExposurePaused && assets != 0) revert RiskOff();
-        MarketParams memory market = abi.decode(data, (MarketParams));
-        if (Id.unwrap(market.id()) != blue.marketId) revert InvalidMarket();
         uint256 oldAssets = expectedSupplyAssets();
         uint256 mintedShares;
         if (assets != 0) {
-            (, mintedShares) = IMorpho(morphoBlue).supply(market, assets, 0, address(this), hex"");
+            (, mintedShares) = IMorpho(morphoBlue).supply(blue.market, assets, 0, address(this), hex"");
         }
         uint256 newAssets = expectedSupplyAssets();
         ids = _ids();
@@ -228,9 +226,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         onlyParentVault
         returns (bytes32[] memory ids, int256 change)
     {
-        if (data.length == 0) revert InvalidMarket();
-        MarketParams memory market = abi.decode(data, (MarketParams));
-        if (Id.unwrap(market.id()) != blue.marketId) revert InvalidMarket();
+        if (data.length != 0) revert UnsupportedData();
         uint256 withdrawn;
         uint256 burnedShares;
         if (assets != 0) {
@@ -238,7 +234,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             if (cash < assets) {
                 uint256 needed = assets - cash;
                 (withdrawn, burnedShares) =
-                    IMorpho(morphoBlue).withdraw(market, needed, 0, address(this), address(this));
+                    IMorpho(morphoBlue).withdraw(blue.market, needed, 0, address(this), address(this));
                 if (withdrawn != needed) revert InsufficientLiquidity();
             }
         }

@@ -460,12 +460,12 @@ contract BlueMidnightAdapterAccountingTest is Test {
 
         vm.prank(address(vault));
         vm.expectRevert(BlueMidnightAdapter.RiskOff.selector);
-        adapter.allocate(abi.encode(blueMarket), 1, bytes4(0), address(0));
+        adapter.allocate(hex"", 1, bytes4(0), address(0));
         vm.expectRevert(BlueMidnightAdapter.ExposureExceeded.selector);
         midnight.invokeBuy(adapter, midnightId, midnightMarket, 0, 1, 0, address(adapter), "");
 
         vm.prank(address(vault));
-        adapter.deallocate(abi.encode(blueMarket), 0, bytes4(0), address(0));
+        adapter.deallocate(hex"", 0, bytes4(0), address(0));
         adapter.collectRepayment(20);
         midnight.takeMakerSell(adapter, midnightId, midnightMarket, 45, 50, 0);
         assertEq(adapter.accounting().trackedCredit, 30);

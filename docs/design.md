@@ -29,7 +29,8 @@ the old adapter only after tracked and actual positions reach zero.
 
 ## Asset and callback flows
 
-- `allocate` and `deallocate` accept calls only from the immutable parent Vault.
+- `allocate` and `deallocate` accept calls only from the immutable parent Vault,
+  reject non-empty adapter data, and use the immutable pinned Blue market.
 - Allocation supplies assets to the pinned Morpho Blue market.
 - `onBuy` accepts calls only from the pinned Midnight contract, enforces the
   parent-Vault allocation bound, withdraws the exact buyer assets from the pinned

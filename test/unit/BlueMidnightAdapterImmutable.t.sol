@@ -16,10 +16,12 @@ contract ImmutableToken {
 
 contract RecoveryRatifier {
     mapping(address => mapping(bytes32 => bool)) public approved;
+    mapping(address => mapping(bytes32 => uint64)) public approvedAtEpoch;
 
     function setRoot(address maker, bytes32 root, bool enabled) external {
         require(msg.sender == maker, "maker");
         approved[maker][root] = enabled;
+        approvedAtEpoch[maker][root] = enabled ? BlueMidnightAdapter(maker).policyEpoch() : 0;
     }
 }
 
@@ -114,6 +116,10 @@ contract BlueMidnightAdapterImmutableTest is Test {
 
     function testCuratorOnlyPolicySettersAllowBothDirectionsAndEpochInvalidation() public {
         uint64 epoch = adapter.policyEpoch();
+        bytes32 preRotationRoot = keccak256("pre-rotation-root");
+        vm.prank(QUOTER);
+        adapter.approveRoot(preRotationRoot);
+        assertEq(ratifier.approvedAtEpoch(address(adapter), preRotationRoot), epoch);
 
         vm.prank(QUOTER);
         vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
@@ -136,6 +142,8 @@ contract BlueMidnightAdapterImmutableTest is Test {
         adapter.setRootApprover(replacement);
         assertEq(adapter.rootApprover(), replacement);
         assertEq(adapter.policyEpoch(), ++epoch);
+        assertTrue(ratifier.approved(address(adapter), preRotationRoot));
+        assertNotEq(ratifier.approvedAtEpoch(address(adapter), preRotationRoot), adapter.policyEpoch());
         bytes32 replacementRoot = keccak256("replacement-root");
         vm.prank(replacement);
         adapter.approveRoot(replacementRoot);
@@ -143,8 +151,16 @@ contract BlueMidnightAdapterImmutableTest is Test {
         vm.prank(QUOTER);
         vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
         adapter.setRootApprover(QUOTER);
+        vm.prank(QUOTER);
+        vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
+        adapter.approveRoot(keccak256("former-approver-root"));
+        vm.prank(QUOTER);
+        vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
+        adapter.revokeRoot(preRotationRoot);
         vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
         adapter.setRootApprover(replacement);
+        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
+        adapter.setRootApprover(address(0));
 
         vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
         adapter.setMaxExpiryHorizon(0);

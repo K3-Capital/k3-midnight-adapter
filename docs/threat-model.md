@@ -11,9 +11,10 @@ when dependencies change.
 The constructor pins the Blue market, Midnight market, economic policy, ratifier,
 and hot root-approver EOA. There is no generic governance-dispatch or custom
 deployment surface.
-Configuration expansion requires deploying a replacement adapter and
+Immutable configuration expansion requires deploying a replacement adapter and
 registering/capping it through Vault V2 governance. The sentinel can reduce risk
-immediately but cannot expand it. The root approver may approve roots only before
+immediately but cannot expand it. The curator may rotate the root approver; each
+rotation bumps the epoch. The root approver may approve roots only before
 pause and may revoke roots after pause through the adapter; it is not authorized
 in Midnight or Morpho Blue and cannot select a receiver, callback, market, or
 arbitrary external call.

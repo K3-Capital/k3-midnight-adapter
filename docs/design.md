@@ -12,7 +12,7 @@ for additional production behavior.
 
 Each `BlueMidnightAdapter` instance binds exactly one parent Vault V2, one asset,
 one Morpho Blue market, one Midnight market, one `PolicySetterRatifier`, one
-one economic policy, and one immutable hot root-approver EOA in its constructor. The adapter is the
+one economic policy, and one curator-rotatable hot root-approver EOA initialized in its constructor. The adapter is the
 Midnight maker and the owner of its lender credit. Vault V2's adapter allocation
 and cap are the sole concentration boundary; there is no adapter-local market
 registry or exposure-cap layer.
@@ -61,7 +61,7 @@ The operator views are `realAssets`, `expectedSupplyAssets`,
 
 - The parent Vault owns the economic claim and controls allocation/deallocation.
 - Vault governance adds and caps the adapter; the cap is the exposure boundary.
-- The curator alone can change the three live policy values in either direction;
+|  The curator alone can change the three live policy values in either direction and rotate the root approver;
   every accepted change increments the epoch and invalidates prior roots. The
   hot root approver can approve roots only before pause and can revoke roots after
   pause, but cannot set policy or move assets.
@@ -70,7 +70,7 @@ The operator views are `realAssets`, `expectedSupplyAssets`,
   curator or sentinel.
 - The exposure pause blocks new buys while repayment and policy-valid
   reduce-only maker-sell recovery remain available. No emergency function moves
-  primary assets to an operator, curator, quoter, or arbitrary receiver.
+  primary assets to an operator, curator, root approver, or arbitrary receiver.
 
 ## Deployment and operations
 
@@ -80,7 +80,7 @@ code hash before an operator accepts the deployment for Vault registration. The
 release gate uses the named `deployment` Foundry profile and enforces the adapter
 runtime budget plus EIP-170 for every deployable production contract.
 
-Normal migration is: deploy replacement → verify constructor/code hash and ABI →
+Normal migration for immutable configuration is: deploy replacement → verify constructor/code hash and ABI →
 add and cap through Vault V2 governance → allocate gradually → pause new exposure and
 recover/deallocate the old adapter → remove it after zero tracked and actual
 positions. Monitoring covers pause/epoch/root-approval events, Blue liquidity,

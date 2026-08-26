@@ -168,11 +168,11 @@ Operator views include `realAssets`, `expectedSupplyAssets`,
    zero.
 
 Never use an emergency path to transfer USDC, Blue shares, or Midnight credit to
-an operator, curator, quoter, or arbitrary receiver.
+an operator, curator, root approver, or arbitrary receiver.
 
 ## Migration and incident handling
 
-A configuration change requires a replacement adapter. Deploy the new immutable
+An immutable configuration change requires a replacement adapter. Deploy the new immutable
 adapter, verify its configuration and code hash, add and cap it through Vault V2
 governance, then risk-off/deallocate the old adapter as liquidity permits. Remove
 the old adapter only after tracked and actual positions are zero. Preserve the

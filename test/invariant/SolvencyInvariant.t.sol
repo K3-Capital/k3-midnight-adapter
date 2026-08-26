@@ -6,12 +6,13 @@ import {BlueMidnightAdapter} from "../../src/BlueMidnightAdapter.sol";
 import {MarketParams} from "morpho-blue/interfaces/IMorpho.sol";
 import {AdapterTestMarket} from "../utils/AdapterTestMarket.sol";
 import {MarketEconomicPolicy} from "../../src/types/AdapterTypes.sol";
-import {ExitToken, ExitVault, ExitMorpho} from "../unit/BlueMidnightAdapterExit.t.sol";
+import {ExitToken, ExitVault, ExitMorpho, ExitMidnight} from "../unit/BlueMidnightAdapterExit.t.sol";
 
 contract SolvencyInvariantTest is Test {
     ExitToken token;
     ExitVault vault;
     ExitMorpho morpho;
+    ExitMidnight midnight;
     BlueMidnightAdapter adapter;
     MarketParams market;
 
@@ -19,14 +20,15 @@ contract SolvencyInvariantTest is Test {
         token = new ExitToken();
         vault = new ExitVault(address(token));
         morpho = new ExitMorpho(address(token));
+        midnight = new ExitMidnight(address(token));
         market = MarketParams(address(token), address(1), address(2), address(3), 0);
         adapter = new BlueMidnightAdapter(
             address(vault),
             market,
-            address(4),
+            address(midnight),
             address(morpho),
             address(5),
-            AdapterTestMarket.make(address(4), address(token)),
+            AdapterTestMarket.make(address(midnight), address(token)),
             MarketEconomicPolicy(1_000, 0, 20 days),
             address(this)
         );

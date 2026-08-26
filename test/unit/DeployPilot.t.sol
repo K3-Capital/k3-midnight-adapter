@@ -30,6 +30,12 @@ contract DeployVerificationVault {
 
 contract DeployVerificationRatifier {}
 
+contract DeployVerificationMidnightAuth {
+    function setIsAuthorized(address, bool, address onBehalf) external {
+        require(onBehalf == msg.sender, "caller");
+    }
+}
+
 contract DeployPilotVerificationTest is Test {
     DeployVerificationToken internal token;
     DeployVerificationVault internal vault;
@@ -38,12 +44,13 @@ contract DeployPilotVerificationTest is Test {
     MarketParams internal blueMarket;
     Market internal midnightMarket;
     MarketEconomicPolicy internal policy;
-    address internal constant MIDNIGHT = address(0x100);
+    address internal constant MIDNIGHT = address(0x1000);
     address internal constant MORPHO = address(0x200);
     address internal constant QUOTER = address(0x300);
 
     function setUp() public {
         token = new DeployVerificationToken();
+        vm.etch(MIDNIGHT, type(DeployVerificationMidnightAuth).runtimeCode);
         vault = new DeployVerificationVault(address(token));
         ratifier = new DeployVerificationRatifier();
         blueMarket = MarketParams(address(token), address(0), address(0x400), address(0x500), 0);

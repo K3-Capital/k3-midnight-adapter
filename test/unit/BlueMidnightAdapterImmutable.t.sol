@@ -14,6 +14,15 @@ contract ImmutableToken {
     }
 }
 
+contract ImmutableMidnight {
+    mapping(address => mapping(address => bool)) public isAuthorized;
+
+    function setIsAuthorized(address authorized, bool enabled, address onBehalf) external {
+        require(onBehalf == msg.sender, "caller");
+        isAuthorized[onBehalf][authorized] = enabled;
+    }
+}
+
 contract RecoveryRatifier {
     mapping(address => mapping(bytes32 => bool)) public approved;
     mapping(address => mapping(bytes32 => uint64)) public approvedAtEpoch;
@@ -54,10 +63,11 @@ contract BlueMidnightAdapterImmutableTest is Test {
     ImmutableVault internal vault;
     RecoveryRatifier internal ratifier;
     BlueMidnightAdapter internal adapter;
+    ImmutableMidnight internal midnight;
     MarketParams internal blue;
     Market internal midnightMarket;
     MarketEconomicPolicy internal policy;
-    address internal constant MIDNIGHT = address(0x100);
+
     address internal constant MORPHO = address(0x200);
     address internal constant QUOTER = address(0x400);
     address internal constant ORACLE = address(0x500);
@@ -65,12 +75,13 @@ contract BlueMidnightAdapterImmutableTest is Test {
 
     function setUp() public {
         token = new ImmutableToken();
+        midnight = new ImmutableMidnight();
         vault = new ImmutableVault(address(token));
         ratifier = new RecoveryRatifier();
         blue = MarketParams(address(token), address(0), ORACLE, IRM, 0);
         midnightMarket = Market({
             chainId: block.chainid,
-            midnight: MIDNIGHT,
+            midnight: address(midnight),
             loanToken: address(token),
             collateralParams: new CollateralParams[](0),
             maturity: block.timestamp + 30 days,
@@ -80,14 +91,14 @@ contract BlueMidnightAdapterImmutableTest is Test {
         });
         policy = MarketEconomicPolicy(100, 1, 20 days);
         adapter = new BlueMidnightAdapter(
-            address(vault), blue, MIDNIGHT, MORPHO, address(ratifier), midnightMarket, policy, QUOTER
+            address(vault), blue, address(midnight), MORPHO, address(ratifier), midnightMarket, policy, QUOTER
         );
     }
 
     function testConstructorPinsAllDeploymentIdentity() public view {
         assertEq(adapter.parentVault(), address(vault));
         assertEq(adapter.asset(), address(token));
-        assertEq(adapter.midnight(), MIDNIGHT);
+        assertEq(adapter.midnight(), address(midnight));
         assertEq(adapter.morphoBlue(), MORPHO);
         assertEq(adapter.ratifier(), address(ratifier));
         assertEq(adapter.rootApprover(), QUOTER);
@@ -179,7 +190,7 @@ contract BlueMidnightAdapterImmutableTest is Test {
         invalid.loanToken = address(0xBAD);
         vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
         new BlueMidnightAdapter(
-            address(vault), invalid, MIDNIGHT, MORPHO, address(ratifier), midnightMarket, policy, QUOTER
+            address(vault), invalid, address(midnight), MORPHO, address(ratifier), midnightMarket, policy, QUOTER
         );
     }
 }

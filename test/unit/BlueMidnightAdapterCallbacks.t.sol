@@ -37,6 +37,12 @@ contract CallbackTokenMock {
     }
 }
 
+contract CallbackMidnightAuth {
+    function setIsAuthorized(address, bool, address onBehalf) external {
+        require(onBehalf == msg.sender, "caller");
+    }
+}
+
 contract BlueMidnightAdapterCallbacksTest is Test {
     BlueMidnightAdapter adapter;
     CallbackVaultMock vault;
@@ -44,6 +50,7 @@ contract BlueMidnightAdapterCallbacksTest is Test {
     function setUp() public {
         CallbackTokenMock token = new CallbackTokenMock();
         vault = new CallbackVaultMock(address(token));
+        vm.etch(address(0x200), type(CallbackMidnightAuth).runtimeCode);
         Market memory midnightMarket = Market({
             chainId: block.chainid,
             midnight: address(0x200),

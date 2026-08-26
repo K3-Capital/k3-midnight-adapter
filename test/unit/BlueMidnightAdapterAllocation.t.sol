@@ -117,6 +117,12 @@ contract AllocationMorpho {
     }
 }
 
+contract AllocationMidnightAuth {
+    function setIsAuthorized(address, bool, address onBehalf) external {
+        require(onBehalf == msg.sender, "caller");
+    }
+}
+
 contract BlueMidnightAdapterAllocationTest is Test {
     using MarketParamsLib for MarketParams;
     BlueMidnightAdapter adapter;
@@ -129,17 +135,18 @@ contract BlueMidnightAdapterAllocationTest is Test {
         token = new AllocationToken();
         vault = new AllocationVault(address(token));
         morpho = new AllocationMorpho(address(token));
+        vm.etch(address(0x1000), type(AllocationMidnightAuth).runtimeCode);
         market.loanToken = address(token);
         MarketEconomicPolicy memory policy = MarketEconomicPolicy(1_000, 0, 20 days);
         adapter = new BlueMidnightAdapter(
-            address(vault), market, address(4), address(morpho), address(5), _pinnedMarket(), policy, address(this)
+            address(vault), market, address(0x1000), address(morpho), address(5), _pinnedMarket(), policy, address(this)
         );
     }
 
     function _pinnedMarket() internal view returns (Market memory) {
         return Market({
             chainId: block.chainid,
-            midnight: address(4),
+            midnight: address(0x1000),
             loanToken: address(token),
             collateralParams: new CollateralParams[](0),
             maturity: block.timestamp + 30 days,

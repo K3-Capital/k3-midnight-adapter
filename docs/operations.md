@@ -122,10 +122,20 @@ EVM. This is a reproducible fixture measurement, not a target-chain receipt;
 production total gas must still be captured from the target-chain transaction
 receipt or a chain-specific gas estimate.
 
+## Shared ratifier topology
+
+Deploy one `PolicySetterRatifier` per Midnight deployment and chain. Every
+market-specific adapter for that Midnight instance receives the same ratifier
+address; roots remain isolated by adapter maker and each adapter's policy epoch.
+Only a different Midnight deployment or incompatible ratifier version requires
+another ratifier address. The adapter constructor authorizes that shared ratifier
+for the adapter's own maker account, so no post-deployment impersonation or
+manual authorization transaction is required.
+
 ## Initial configuration
 
 The constructor pins the single approved Morpho Blue market, economic policy,
-quoter, and Midnight market. Vault V2 governance must:
+initial root approver, ratifier, and Midnight market. Vault V2 governance must:
 
 1. Verify the constructor and code hash.
 2. Add and cap the adapter through the Vault V2 timelock.

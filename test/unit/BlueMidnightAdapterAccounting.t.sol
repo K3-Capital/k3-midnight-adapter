@@ -137,11 +137,17 @@ contract AccountingMidnightMock {
     uint64 public settlement;
     AccountingTokenMock immutable token;
     PolicySetterRatifier public ratifier;
+    mapping(address => mapping(address => bool)) public isAuthorized;
     mapping(bytes32 => uint128) public credit;
     mapping(bytes32 => uint128) public pendingFee;
 
     constructor(address token_) {
         token = AccountingTokenMock(token_);
+    }
+
+    function setIsAuthorized(address authorized, bool enabled, address onBehalf) external {
+        require(onBehalf == msg.sender, "caller");
+        isAuthorized[onBehalf][authorized] = enabled;
     }
 
     function setRatifier(PolicySetterRatifier ratifier_) external {

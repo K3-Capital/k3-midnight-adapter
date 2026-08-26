@@ -116,9 +116,15 @@ contract ExitMidnight {
     mapping(bytes32 => uint256) public available;
     mapping(bytes32 => uint256) public saleAssets;
     mapping(bytes32 => uint256) public pendingFees;
+    mapping(address => mapping(address => bool)) public isAuthorized;
 
     constructor(address token_) {
         token = ExitToken(token_);
+    }
+
+    function setIsAuthorized(address authorized, bool enabled, address onBehalf) external {
+        require(onBehalf == msg.sender, "caller");
+        isAuthorized[onBehalf][authorized] = enabled;
     }
 
     function seed(Market calldata market, uint256 credit, uint256 availableAssets, uint256 sellerAssets) external {

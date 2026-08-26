@@ -80,6 +80,12 @@ code hash before an operator accepts the deployment for Vault registration. The
 release gate uses the named `deployment` Foundry profile and enforces the adapter
 runtime budget plus EIP-170 for every deployable production contract.
 
+One `PolicySetterRatifier` is shared by all market-specific adapters targeting the
+same Midnight deployment and chain. Its maker-keyed root and epoch state isolates
+those adapters, while each adapter constructor authorizes the shared ratifier for
+its own maker account. A separate Midnight deployment or incompatible ratifier
+version requires a separate ratifier.
+
 Normal migration for immutable configuration is: deploy replacement → verify constructor/code hash and ABI →
 add and cap through Vault V2 governance → allocate gradually → pause new exposure and
 recover/deallocate the old adapter → remove it after zero tracked and actual

@@ -31,8 +31,11 @@ contract DeployVerificationVault {
 contract DeployVerificationRatifier {}
 
 contract DeployVerificationMidnightAuth {
-    function setIsAuthorized(address, bool, address onBehalf) external {
+    mapping(address => mapping(address => bool)) public isAuthorized;
+
+    function setIsAuthorized(address authorized, bool enabled, address onBehalf) external {
         require(onBehalf == msg.sender, "caller");
+        isAuthorized[onBehalf][authorized] = enabled;
     }
 }
 

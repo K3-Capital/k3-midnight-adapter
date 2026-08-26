@@ -110,6 +110,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         rootApprover = _rootApprover;
         policyEpoch = 1;
         IMidnight(_midnight).setIsAuthorized(_ratifier, true, address(this));
+        if (!IMidnight(_midnight).isAuthorized(address(this), _ratifier)) revert InvalidCallback();
         SafeERC20Lib.safeApprove(asset, _morphoBlue, type(uint256).max);
         SafeERC20Lib.safeApprove(asset, _parentVault, type(uint256).max);
     }

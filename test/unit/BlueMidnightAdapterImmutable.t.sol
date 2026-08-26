@@ -23,6 +23,12 @@ contract ImmutableMidnight {
     }
 }
 
+contract NoopAuthorizationMidnight {
+    mapping(address => mapping(address => bool)) public isAuthorized;
+
+    function setIsAuthorized(address, bool, address) external {}
+}
+
 contract RecoveryRatifier {
     mapping(address => mapping(bytes32 => bool)) public approved;
     mapping(address => mapping(bytes32 => uint64)) public approvedAtEpoch;
@@ -106,6 +112,15 @@ contract BlueMidnightAdapterImmutableTest is Test {
         assertEq(configured.loanToken, blue.loanToken);
         assertEq(configured.oracle, blue.oracle);
         assertEq(id, Id.unwrap(blue.id()));
+    }
+
+    function testConstructorRejectsUnconfirmedAuthorization() public {
+        NoopAuthorizationMidnight noop = new NoopAuthorizationMidnight();
+        midnightMarket.midnight = address(noop);
+        vm.expectRevert(BlueMidnightAdapter.InvalidCallback.selector);
+        new BlueMidnightAdapter(
+            address(vault), blue, address(noop), MORPHO, address(ratifier), midnightMarket, policy, QUOTER
+        );
     }
 
     function testQuoterRevocationEnablesSentinelRecoveryRootButNotBuys() public {

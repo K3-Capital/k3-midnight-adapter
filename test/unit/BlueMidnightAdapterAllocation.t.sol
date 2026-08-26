@@ -117,6 +117,15 @@ contract AllocationMorpho {
     }
 }
 
+contract AllocationMidnightAuth {
+    mapping(address => mapping(address => bool)) public isAuthorized;
+
+    function setIsAuthorized(address authorized, bool enabled, address onBehalf) external {
+        require(onBehalf == msg.sender, "caller");
+        isAuthorized[onBehalf][authorized] = enabled;
+    }
+}
+
 contract BlueMidnightAdapterAllocationTest is Test {
     using MarketParamsLib for MarketParams;
     BlueMidnightAdapter adapter;
@@ -129,17 +138,18 @@ contract BlueMidnightAdapterAllocationTest is Test {
         token = new AllocationToken();
         vault = new AllocationVault(address(token));
         morpho = new AllocationMorpho(address(token));
+        vm.etch(address(0x1000), type(AllocationMidnightAuth).runtimeCode);
         market.loanToken = address(token);
-        MarketEconomicPolicy memory policy = MarketEconomicPolicy(1_000, 0, 30 days, 20 days, 0, 0, true);
+        MarketEconomicPolicy memory policy = MarketEconomicPolicy(1_000, 0, 20 days);
         adapter = new BlueMidnightAdapter(
-            address(vault), market, address(4), address(morpho), address(5), _pinnedMarket(), policy, address(this)
+            address(vault), market, address(0x1000), address(morpho), address(5), _pinnedMarket(), policy, address(this)
         );
     }
 
     function _pinnedMarket() internal view returns (Market memory) {
         return Market({
             chainId: block.chainid,
-            midnight: address(4),
+            midnight: address(0x1000),
             loanToken: address(token),
             collateralParams: new CollateralParams[](0),
             maturity: block.timestamp + 30 days,
@@ -201,7 +211,7 @@ contract BlueMidnightAdapterAllocationTest is Test {
 
         assertEq(adapter.blueAvailableLiquidity(), 100_000);
         assertEq(adapter.expectedSupplyAssets(), 500_000);
-        assertFalse(adapter.riskOffActive());
+        assertFalse(adapter.newExposurePaused());
         assertEq(adapter.blueAvailableLiquidity(), 100_000);
     }
 
@@ -219,6 +229,6 @@ contract BlueMidnightAdapterAllocationTest is Test {
         assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 700);
 
         morpho.setMarket(market.id(), 1_000, 2_000_000, 800);
-        assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 200);
+        assertEq(adapter.buyerAssetsBound(adapter.pinnedMidnightMarketHash()), 700);
     }
 }

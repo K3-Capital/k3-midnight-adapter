@@ -116,9 +116,15 @@ contract ExitMidnight {
     mapping(bytes32 => uint256) public available;
     mapping(bytes32 => uint256) public saleAssets;
     mapping(bytes32 => uint256) public pendingFees;
+    mapping(address => mapping(address => bool)) public isAuthorized;
 
     constructor(address token_) {
         token = ExitToken(token_);
+    }
+
+    function setIsAuthorized(address authorized, bool enabled, address onBehalf) external {
+        require(onBehalf == msg.sender, "caller");
+        isAuthorized[onBehalf][authorized] = enabled;
     }
 
     function seed(Market calldata market, uint256 credit, uint256 availableAssets, uint256 sellerAssets) external {
@@ -207,7 +213,7 @@ contract BlueMidnightAdapterExitTest is Test {
         midnight = new ExitMidnight(address(token));
         midnightMarket = AdapterTestMarket.make(address(midnight), address(token));
         market = MarketParams(address(token), address(1), address(2), address(3), 0);
-        MarketEconomicPolicy memory policy = MarketEconomicPolicy(1_000, 0, 30 days, 20 days, 0, 0, true);
+        MarketEconomicPolicy memory policy = MarketEconomicPolicy(1_000, 0, 20 days);
         adapter = new BlueMidnightAdapter(
             address(vault),
             market,
@@ -232,12 +238,12 @@ contract BlueMidnightAdapterExitTest is Test {
 
         vault.setSentinel(sentinel, true);
         vm.prank(sentinel);
-        adapter.riskOff(bytes32("incident"));
+        adapter.pauseNewExposure(bytes32("incident"));
 
         vm.prank(address(vault));
         adapter.deallocate(abi.encode(market), 100, bytes4(0), address(0));
         assertEq(token.balanceOf(address(adapter)), 100);
-        assertTrue(adapter.riskOffActive());
+        assertTrue(adapter.newExposurePaused());
     }
 
     function testIlliquidDeallocationRevertsWithoutAccountingDrift() public {
@@ -262,7 +268,7 @@ contract BlueMidnightAdapterExitTest is Test {
 
         vault.setSentinel(sentinel, true);
         vm.prank(sentinel);
-        adapter.riskOff(bytes32("repayment"));
+        adapter.pauseNewExposure(bytes32("repayment"));
 
         vm.expectRevert(BlueMidnightAdapter.ExposureExceeded.selector);
         midnight.invokeBuy(address(adapter), midnightMarket, 1, 1);

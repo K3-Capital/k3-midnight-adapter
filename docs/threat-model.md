@@ -8,14 +8,17 @@ deallocate. Morpho Blue and Midnight are external protocols whose pinned
 interfaces and callback ordering are assumptions that must be checked again
 when dependencies change.
 
-The constructor pins the Blue market, Midnight market, economic policy, ratifier,
-and quoter. There is no generic governance-dispatch or custom deployment surface.
-Configuration expansion requires deploying a replacement adapter and
+The constructor pins the Blue market, Midnight market, economic policy, and
+ratifier, and initializes the hot root-approver EOA. The curator may rotate that
+approver through the dedicated setter. There is no generic governance-dispatch
+or custom deployment surface.
+Immutable configuration expansion requires deploying a replacement adapter and
 registering/capping it through Vault V2 governance. The sentinel can reduce risk
-immediately but cannot expand it. The quoter may only approve roots through the
-adapter; revocation is sentinel-controlled. It is not authorized in Midnight or
-Morpho Blue and cannot select a receiver, callback, market, or arbitrary external
-call.
+immediately but cannot expand it. The curator may rotate the root approver; each
+rotation bumps the epoch. The root approver may approve roots only before
+pause and may revoke roots after pause through the adapter; it is not authorized
+in Midnight or Morpho Blue and cannot select a receiver, callback, market, or
+arbitrary external call.
 
 ## Assets and allowed flows
 
@@ -27,24 +30,26 @@ USDC may leave the adapter only to:
 
 Midnight sells pin both the seller and proceeds receiver to the adapter before
 the callback. Repayments return to the adapter and are resupplied to Blue.
-There is no curator, quoter, or operator rescue path for primary assets.
+There is no curator, root-approver, or operator rescue path for primary assets.
 
 ## Threats and controls
 
 | Threat | Control and evidence |
 | --- | --- |
-| Compromised quoter drains pooled assets | Quoter has root-management only; adapter validates maker, callback, receiver, market, epoch, and economics. |
+| Compromised root approver drains pooled assets | Root approver has root-management only; adapter validates maker, callback, receiver, market, epoch, and economics. |
 | Malicious sell order redirects proceeds | `receiverIfMakerIsSeller == adapter`, `reduceOnly`, policy tick, and callback caller checks. |
 | Stale root after policy change | Root approvals are bound to non-zero `policyEpoch`; every accepted change increments the epoch. |
-| Curator instant risk expansion | No adapter expansion setter exists; replacement configuration goes through a new adapter and Vault V2 governance. |
-| Sentinel expands risk | Sentinel entry points only tighten policy, disable the pinned market, revoke quoters, or activate risk-off. The parent Vault adapter cap is the sole concentration boundary. |
+| Curator instant risk expansion | Curator setters only change the three bounded policy values and increment the epoch; allocation remains controlled by the parent Vault. |
+| Sentinel expands risk | Sentinel can only activate the irreversible new-exposure pause or approve recovery roots. The parent Vault adapter cap is the sole concentration boundary. |
 | Arbitrary Blue routing | Adapter stores one market and rejects callback routing data that is not empty. |
 | NAV double count during Blue/Midnight transitions | Immediate liquidity is adapter cash plus currently withdrawable Blue assets; open Midnight face value is excluded until repayment or an asynchronous sell. |
 | Known protocol loss hidden in NAV | Callback and checkpoint synchronization reduces tracked claims/book value when Midnight or Blue state loses value. |
 | Illiquid withdrawal silently underpays | Deallocation uses adapter cash first, withdraws only the shortfall from configured Blue, and reverts atomically if exact liquidity is unavailable. |
 | Synchronous exit reaches Midnight or arbitrary receiver | Deallocation decodes only the configured Blue market. Maker sells are separate, policy-validated operations with proceeds pinned to the adapter. |
+| Midnight fee policy changes | Settlement and continuous fees remain Midnight protocol-owned external risk; the adapter deliberately applies no duplicate fee ceiling. |
+| Emergency exposure pause | `newExposurePaused` is monotonic and blocks new approvals, allocation, and buys while retaining revocation, deallocation, repayment, and reduce-only recovery. |
 | Reentrancy during external protocol calls | State and caps are checked before transfers; callback entry points require Midnight; no generic external-call primitive exists. |
-| Allowance theft | Allowances are exact-reset for Midnight settlement; quoter is never a spender of adapter assets. |
+| Allowance theft | Allowances are exact-reset for Midnight settlement; root approver is never a spender of adapter assets. |
 
 ## Residual risks
 
@@ -53,8 +58,8 @@ There is no curator, quoter, or operator rescue path for primary assets.
   repayment or a policy-valid asynchronous maker sell.
 - Midnight and Morpho Blue correctness, oracle/economic behavior, and availability
   remain external dependencies.
-- Quoter revocation and risk-off invalidate the current root epoch and latch buys
-  off. A Vault sentinel may approve a recovery root only for the already pinned
+- Policy changes and new-exposure pause invalidate the current root epoch and latch
+  buys off. A Vault sentinel may approve a recovery root only for the already pinned
   adapter; the offer predicate still requires reduce-only maker-sell recovery.
 - The local integration suite is deterministic and does not replace a fork or
   independent audit.

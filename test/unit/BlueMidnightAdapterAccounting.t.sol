@@ -80,6 +80,7 @@ contract AccountingMorphoMock {
     AccountingTokenMock immutable token;
     mapping(bytes32 => uint256) public shares;
     mapping(bytes32 => uint128[3]) public balances;
+    bool public returnShortWithdrawal;
 
     constructor(address token_) {
         token = AccountingTokenMock(token_);
@@ -110,12 +111,17 @@ contract AccountingMorphoMock {
         external
         returns (uint256, uint256)
     {
+        if (returnShortWithdrawal) return (assets - 1, assets - 1);
         bytes32 id = Id.unwrap(params.id());
         shares[id] -= assets;
         balances[id][0] -= uint128(assets);
         balances[id][1] -= uint128(assets);
         token.transfer(receiver, assets);
         return (assets, assets);
+    }
+
+    function setReturnShortWithdrawal(bool enabled) external {
+        returnShortWithdrawal = enabled;
     }
 
     function setBalances(Id id, uint128 supplyAssets, uint128 supplyShares, uint128 borrowAssets, uint256 shareBalance)
@@ -131,11 +137,17 @@ contract AccountingMidnightMock {
     uint64 public settlement;
     AccountingTokenMock immutable token;
     PolicySetterRatifier public ratifier;
+    mapping(address => mapping(address => bool)) public isAuthorized;
     mapping(bytes32 => uint128) public credit;
     mapping(bytes32 => uint128) public pendingFee;
 
     constructor(address token_) {
         token = AccountingTokenMock(token_);
+    }
+
+    function setIsAuthorized(address authorized, bool enabled, address onBehalf) external {
+        require(onBehalf == msg.sender, "caller");
+        isAuthorized[onBehalf][authorized] = enabled;
     }
 
     function setRatifier(PolicySetterRatifier ratifier_) external {
@@ -277,15 +289,8 @@ contract BlueMidnightAdapterAccountingTest is Test {
         ratifier = new PolicySetterRatifier(address(midnight));
         midnightMarket = AdapterTestMarket.make(address(midnight), address(token));
         blueMarket = MarketParams(address(token), address(1), address(2), address(3), 0);
-        MarketEconomicPolicy memory economicPolicy = MarketEconomicPolicy({
-            maxBuyTick: 100,
-            minSellTick: 10,
-            maxTenor: 31 days,
-            maxExpiryHorizon: 30 days,
-            maxContinuousFeePerSecondWad: 10,
-            maxSettlementFeeWad: 20,
-            configured: true
-        });
+        MarketEconomicPolicy memory economicPolicy =
+            MarketEconomicPolicy({maxBuyTick: 100, minSellTick: 10, maxExpiryHorizon: 30 days});
         adapter = new BlueMidnightAdapter(
             address(vault),
             blueMarket,
@@ -429,6 +434,43 @@ contract BlueMidnightAdapterAccountingTest is Test {
         assertEq(adapter.accounting().trackedCredit, 300);
     }
 
+    function testOnBuyEnforcesVaultAllocationAndBlueWithdrawalAtomically() public {
+        vault.setAllocation(adapter.adapterId(), 50);
+        vm.prank(address(midnight));
+        vm.expectRevert(BlueMidnightAdapter.ExposureExceeded.selector);
+        adapter.onBuy(IdLib.toId(midnightMarket), midnightMarket, 100, 100, 0, address(adapter), "");
+        assertEq(adapter.accounting().bookValue, 0);
+
+        vault.setAllocation(adapter.adapterId(), 1_000);
+        morpho.setReturnShortWithdrawal(true);
+        vm.prank(address(midnight));
+        vm.expectRevert(BlueMidnightAdapter.InsufficientLiquidity.selector);
+        adapter.onBuy(IdLib.toId(midnightMarket), midnightMarket, 100, 100, 0, address(adapter), "");
+        assertEq(adapter.accounting().bookValue, 0);
+    }
+
+    function testPauseBlocksNewExposureButAllowsDeallocationRepaymentAndReduceOnlySell() public {
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 20);
+        token.mint(address(midnight), 20);
+        midnight.setPosition(midnightId, 100, 0);
+        midnight.setPosition(IdLib.toId(midnightMarket), 100, 0);
+
+        vault.setSentinel(address(this), true);
+        adapter.pauseNewExposure(bytes32("pause"));
+
+        vm.prank(address(vault));
+        vm.expectRevert(BlueMidnightAdapter.RiskOff.selector);
+        adapter.allocate(abi.encode(blueMarket), 1, bytes4(0), address(0));
+        vm.expectRevert(BlueMidnightAdapter.ExposureExceeded.selector);
+        midnight.invokeBuy(adapter, midnightId, midnightMarket, 0, 1, 0, address(adapter), "");
+
+        vm.prank(address(vault));
+        adapter.deallocate(abi.encode(blueMarket), 0, bytes4(0), address(0));
+        adapter.collectRepayment(20);
+        midnight.takeMakerSell(adapter, midnightId, midnightMarket, 45, 50, 0);
+        assertEq(adapter.accounting().trackedCredit, 30);
+    }
+
     function testSharePriceIsContinuousAtFillAndRealization() public {
         uint256 initialAssets = adapter.realAssets();
         uint256 shares = 1e18;
@@ -444,7 +486,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
     function testQuoterRevocationRejectsNewRootApproval() public {
         bytes32 root = keccak256("revoked-quoter-root");
         vault.setSentinel(address(this), true);
-        adapter.revokeQuoter(address(this));
+        adapter.pauseNewExposure(bytes32("pause"));
         vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
         adapter.approveRoot(root);
     }
@@ -495,81 +537,40 @@ contract BlueMidnightAdapterAccountingTest is Test {
         );
     }
 
-    function testImmediateTighteningBumpsEpochAndRejectsLoosening() public {
-        uint64 before = adapter.policyEpoch();
-        MarketEconomicPolicy memory tighter = MarketEconomicPolicy({
-            maxBuyTick: 99,
-            minSellTick: 10,
-            maxTenor: 31 days,
-            maxExpiryHorizon: 30 days,
-            maxContinuousFeePerSecondWad: 0,
-            maxSettlementFeeWad: 0,
-            configured: true
-        });
-        adapter.tightenMarketEconomicPolicy(tighter);
-        assertGt(adapter.policyEpoch(), before);
-        MarketEconomicPolicy memory looser = tighter;
-        looser.maxBuyTick = 100;
-        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
-        adapter.tightenMarketEconomicPolicy(looser);
-    }
+    function testCuratorCanChangeEachPolicyValueBothDirectionsAndBumpEpoch() public {
+        uint64 epoch = adapter.policyEpoch();
 
-    function _policy(
-        uint24 maxBuyTick,
-        uint24 minSellTick,
-        uint40 maxTenor,
-        uint40 maxExpiryHorizon,
-        uint32 maxFee,
-        uint64 maxSettlementFee
-    ) internal pure returns (MarketEconomicPolicy memory) {
-        return MarketEconomicPolicy({
-            maxBuyTick: maxBuyTick,
-            minSellTick: minSellTick,
-            maxTenor: maxTenor,
-            maxExpiryHorizon: maxExpiryHorizon,
-            maxContinuousFeePerSecondWad: maxFee,
-            maxSettlementFeeWad: maxSettlementFee,
-            configured: true
-        });
-    }
+        adapter.setMaxBuyTick(99);
+        assertEq(adapter.marketEconomicPolicy().maxBuyTick, 99);
+        assertEq(adapter.policyEpoch(), ++epoch);
+        adapter.setMaxBuyTick(100);
+        assertEq(adapter.policyEpoch(), ++epoch);
 
-    function _setEconomicPolicy(BlueMidnightAdapter, bytes32, MarketEconomicPolicy memory) internal {}
+        adapter.setMinSellTick(11);
+        assertEq(adapter.marketEconomicPolicy().minSellTick, 11);
+        assertEq(adapter.policyEpoch(), ++epoch);
+        adapter.setMinSellTick(10);
+        assertEq(adapter.policyEpoch(), ++epoch);
 
-    function _enableMarket(BlueMidnightAdapter, bytes32) internal pure {}
-
-    function _rejectEconomicPolicy(BlueMidnightAdapter target, MarketEconomicPolicy memory policy) internal {
-        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
-        target.tightenMarketEconomicPolicy(policy);
-    }
-
-    function _assertTighteningRejected(MarketEconomicPolicy memory policy, uint64 expectedEpoch) internal {
-        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
-        adapter.tightenMarketEconomicPolicy(policy);
-        assertEq(adapter.policyEpoch(), expectedEpoch);
-    }
-
-    function testTighteningEnforcesAllFieldsAndSentinelAuthorization() public {
-        MarketEconomicPolicy memory initial = _policy(100, 10, 31 days, 30 days, 10, 20);
-        _setEconomicPolicy(adapter, midnightId, initial);
-        uint64 before = adapter.policyEpoch();
-        MarketEconomicPolicy memory tighter = _policy(99, 11, 30 days, 29 days, 9, 19);
+        adapter.setMaxExpiryHorizon(20 days);
+        assertEq(adapter.marketEconomicPolicy().maxExpiryHorizon, 20 days);
+        assertEq(adapter.policyEpoch(), ++epoch);
+        adapter.setMaxExpiryHorizon(30 days);
+        assertEq(adapter.policyEpoch(), ++epoch);
 
         vm.prank(address(0xBEEF));
         vm.expectRevert(BlueMidnightAdapter.Unauthorized.selector);
-        adapter.tightenMarketEconomicPolicy(tighter);
-        assertEq(adapter.policyEpoch(), before);
+        adapter.setMaxBuyTick(99);
+        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
+        adapter.setMaxBuyTick(100);
+        vm.expectRevert(BlueMidnightAdapter.InvalidValue.selector);
+        adapter.setMaxBuyTick(type(uint24).max);
 
-        vault.setSentinel(address(this), true);
-        adapter.tightenMarketEconomicPolicy(tighter);
-        assertGt(adapter.policyEpoch(), before);
-        uint64 tightenedEpoch = adapter.policyEpoch();
-
-        _assertTighteningRejected(_policy(100, 11, 30 days, 29 days, 9, 19), tightenedEpoch);
-        _assertTighteningRejected(_policy(99, 10, 30 days, 29 days, 9, 19), tightenedEpoch);
-        _assertTighteningRejected(_policy(99, 11, 31 days, 29 days, 9, 19), tightenedEpoch);
-        _assertTighteningRejected(_policy(99, 11, 30 days, 30 days, 9, 19), tightenedEpoch);
-        _assertTighteningRejected(_policy(99, 11, 30 days, 29 days, 10, 19), tightenedEpoch);
-        _assertTighteningRejected(_policy(99, 11, 30 days, 29 days, 9, 20), tightenedEpoch);
-        _assertTighteningRejected(_policy(99, 11, 30 days, 29 days, 9, 19), tightenedEpoch);
+        Offer memory offer = _validBuyOffer(100);
+        bytes32 root = HashLib.hashOffer(offer);
+        adapter.approveRoot(root);
+        adapter.setMaxBuyTick(99);
+        vm.expectRevert(IPolicySetterRatifier.RootNotApproved.selector);
+        midnight.takeMakerBuy(adapter, offer, abi.encode(root, 0, new bytes32[](0)), 100, 100, 0);
     }
 }

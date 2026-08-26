@@ -16,7 +16,7 @@ contract PolicySetterRatifier is IPolicySetterRatifier {
         MIDNIGHT = midnight;
     }
 
-    /// @dev Only the maker may relay root approval. In particular, quoters are never
+    /// @dev Only the maker may relay root approval. In particular, root approvers are never
     /// checked through Midnight's broad maker authorization mechanism.
     function setRoot(address maker, bytes32 root, bool approved) external {
         _setRoot(maker, root, approved);

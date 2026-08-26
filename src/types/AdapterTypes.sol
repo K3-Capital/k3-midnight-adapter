@@ -20,9 +20,5 @@ struct MarketAccounting {
 struct MarketEconomicPolicy {
     uint24 maxBuyTick;
     uint24 minSellTick;
-    uint40 maxTenor;
     uint40 maxExpiryHorizon;
-    uint32 maxContinuousFeePerSecondWad;
-    uint64 maxSettlementFeeWad;
-    bool configured;
 }

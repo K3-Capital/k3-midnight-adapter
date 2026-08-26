@@ -24,13 +24,13 @@ contract DeployPilot is Script {
         address ratifier = vm.envAddress("RATIFIER");
         Market memory pinnedMidnightMarket = abi.decode(vm.envBytes("MIDNIGHT_MARKET"), (Market));
         MarketEconomicPolicy memory policy = abi.decode(vm.envBytes("ECONOMIC_POLICY"), (MarketEconomicPolicy));
-        address quoter = vm.envAddress("APPROVED_QUOTER");
+        address rootApprover = vm.envAddress("ROOT_APPROVER");
         bytes32 expectedCodeHash = vm.envBytes32("EXPECTED_RUNTIME_CODE_HASH");
 
         vm.startBroadcast();
         adapter = address(
             new BlueMidnightAdapter(
-                parentVault, blueMarket, midnight, morphoBlue, ratifier, pinnedMidnightMarket, policy, quoter
+                parentVault, blueMarket, midnight, morphoBlue, ratifier, pinnedMidnightMarket, policy, rootApprover
             )
         );
         vm.stopBroadcast();
@@ -45,7 +45,7 @@ contract DeployPilot is Script {
             ratifier,
             pinnedMidnightMarket,
             policy,
-            quoter,
+            rootApprover,
             expectedCodeHash
         );
     }
@@ -59,7 +59,7 @@ contract DeployPilot is Script {
         address ratifier,
         Market memory pinnedMidnightMarket,
         MarketEconomicPolicy memory policy,
-        address quoter,
+        address rootApprover,
         bytes32 expectedCodeHash
     ) external view {
         _verifyDeployment(
@@ -71,7 +71,7 @@ contract DeployPilot is Script {
             ratifier,
             pinnedMidnightMarket,
             policy,
-            quoter,
+            rootApprover,
             expectedCodeHash
         );
     }
@@ -85,7 +85,7 @@ contract DeployPilot is Script {
         address ratifier,
         Market memory pinnedMidnightMarket,
         MarketEconomicPolicy memory policy,
-        address quoter,
+        address rootApprover,
         bytes32 expectedCodeHash
     ) internal view {
         require(deployed.parentVault() == parentVault, "parent vault mismatch");
@@ -93,7 +93,7 @@ contract DeployPilot is Script {
         require(deployed.midnight() == midnight, "midnight mismatch");
         require(deployed.morphoBlue() == morphoBlue, "morpho mismatch");
         require(deployed.ratifier() == ratifier, "ratifier mismatch");
-        require(deployed.approvedQuoter() == quoter, "quoter mismatch");
+        require(deployed.rootApprover() == rootApprover, "root approver mismatch");
         _verifyBlueMarket(deployed, blueMarket);
         _verifyMidnightMarket(deployed, pinnedMidnightMarket);
         _verifyPolicy(deployed.marketEconomicPolicy(), policy);
@@ -133,13 +133,6 @@ contract DeployPilot is Script {
     function _verifyPolicy(MarketEconomicPolicy memory actual, MarketEconomicPolicy memory expected) internal pure {
         require(actual.maxBuyTick == expected.maxBuyTick, "policy buy tick mismatch");
         require(actual.minSellTick == expected.minSellTick, "policy sell tick mismatch");
-        require(actual.maxTenor == expected.maxTenor, "policy tenor mismatch");
         require(actual.maxExpiryHorizon == expected.maxExpiryHorizon, "policy expiry mismatch");
-        require(
-            actual.maxContinuousFeePerSecondWad == expected.maxContinuousFeePerSecondWad,
-            "policy continuous fee mismatch"
-        );
-        require(actual.maxSettlementFeeWad == expected.maxSettlementFeeWad, "policy settlement fee mismatch");
-        require(actual.configured == expected.configured, "policy configured mismatch");
     }
 }

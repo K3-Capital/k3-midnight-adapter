@@ -72,8 +72,8 @@ Run the gate from a clean checkout; its `out/` output is disposable and ignored.
 3. Confirm the Vault V2 asset is the same token used by the approved Blue market
    and the one immutable Midnight market. The parent Vault adapter cap is the
    sole concentration boundary; the adapter has no internal exposure cap.
-4. Encode the exact Blue market, Midnight market, economic policy, and approved
-   quoter identity; record the expected runtime code hash.
+4. Encode the exact Blue market, Midnight market, economic policy, and initial
+   root-approver identity; record the expected runtime code hash.
 5. Deploy directly with `script/DeployPilot.s.sol`. Do not commit broadcast
    directories or deployment state.
 
@@ -91,19 +91,26 @@ export MORPHO_BLUE=0x...
 export RATIFIER=0x...
 export MIDNIGHT_MARKET=0x...
 export ECONOMIC_POLICY=0x...
-export APPROVED_QUOTER=0x...
+export ROOT_APPROVER=0x...
 export EXPECTED_RUNTIME_CODE_HASH=0x...
 forge script script/DeployPilot.s.sol --rpc-url "$RPC_URL" --broadcast
 ```
 
 The script verifies every constructor value and runtime code hash before the
 deployment is accepted for Vault registration. Query `parentVault`, `asset`,
-`midnight`, `morphoBlue`, `ratifier`, `approvedQuoter`, and both market IDs.
+`midnight`, `morphoBlue`, `ratifier`, `rootApprover`, and both market IDs.
 
-The current build reports 18,991 runtime bytes and 23,307 creation bytes. The
-runtime delta versus the approved Stage 3 measurement (22,916 bytes) is -3,925
+The root approver EOA can only relay root approval/revocation. The curator may
+replace that EOA through `setRootApprover`; the update increments the policy
+epoch and invalidates prior roots. Safe-administered policy setters control
+`maxBuyTick`, `minSellTick`, and `maxExpiryHorizon`; each accepted change also
+increments the policy epoch. The sentinel's `pauseNewExposure` is monotonic: it
+stops new buys, approvals, and allocation while preserving exits and recovery.
+
+The current build reports 17,251 runtime bytes and 21,130 creation bytes. The
+runtime delta versus the approved Stage 3 measurement (18,991 bytes) is -1,740
 bytes. `runtime_bytes * 200` is only the EVM runtime code-deposit component
-(3,798,200 gas). The reproducible local direct-CREATE fixture is:
+(3,450,200 gas). The reproducible local direct-CREATE fixture is:
 
 ```sh
 forge test --match-path test/unit/DeployPilot.t.sol \
@@ -115,25 +122,37 @@ EVM. This is a reproducible fixture measurement, not a target-chain receipt;
 production total gas must still be captured from the target-chain transaction
 receipt or a chain-specific gas estimate.
 
+## Shared ratifier topology
+
+Deploy one `PolicySetterRatifier` per Midnight deployment and chain. Every
+market-specific adapter for that Midnight instance receives the same ratifier
+address; roots remain isolated by adapter maker and each adapter's policy epoch.
+Only a different Midnight deployment or incompatible ratifier version requires
+another ratifier address. The adapter constructor authorizes that shared ratifier
+for the adapter's own maker account, so no post-deployment impersonation or
+manual authorization transaction is required.
+
 ## Initial configuration
 
 The constructor pins the single approved Morpho Blue market, economic policy,
-quoter, and Midnight market. Vault V2 governance must:
+initial root approver, ratifier, and Midnight market. Vault V2 governance must:
 
 1. Verify the constructor and code hash.
 2. Add and cap the adapter through the Vault V2 timelock.
 3. Exercise allocation, callback, repayment, asynchronous maker-sell, and exact
    deallocation paths on the deterministic local deployment.
 
-The sentinel may only tighten policy for the pinned market, revoke the approved
-quoter, bump the risk-off epoch, and lower limits. Repayment collection remains
-available during risk-off.
+The curator may change policy in either direction for the pinned market, while the
+sentinel may permanently pause new exposure. The root approver may revoke roots
+even after pause; recovery-root approval is restricted to the curator or sentinel.
+Repayment collection remains available during the exposure pause.
 
 ## Monitoring
 
 Alert on:
 
-- `PolicyEpochIncremented`, `QuoterRevoked`, `MarketEconomicPolicyTightened`, and risk-off events;
+- `PolicyEpochIncremented`, `RootApproverUpdated`, `MaxBuyTickUpdated`,
+  `MinSellTickUpdated`, `MaxExpiryHorizonUpdated`, and `NewExposurePaused` events;
 - Blue liquidity and adapter supply assets;
 - the parent Vault adapter allocation/cap;
 - book value, maturity claims, recognized losses, and realized P&L;
@@ -146,7 +165,7 @@ Operator views include `realAssets`, `expectedSupplyAssets`,
 
 ## Risk-off and rollback
 
-1. Revoke the quoter and call `riskOff` with a recorded reason.
+1. Call `pauseNewExposure` with a recorded reason.
 2. Lower the parent Vault adapter allocation cap to zero.
 3. Continue permissionless repayment collection.
 4. Withdraw available Blue liquidity.
@@ -159,11 +178,11 @@ Operator views include `realAssets`, `expectedSupplyAssets`,
    zero.
 
 Never use an emergency path to transfer USDC, Blue shares, or Midnight credit to
-an operator, curator, quoter, or arbitrary receiver.
+an operator, curator, root approver, or arbitrary receiver.
 
 ## Migration and incident handling
 
-A configuration change requires a replacement adapter. Deploy the new immutable
+An immutable configuration change requires a replacement adapter. Deploy the new immutable
 adapter, verify its configuration and code hash, add and cap it through Vault V2
 governance, then risk-off/deallocate the old adapter as liquidity permits. Remove
 the old adapter only after tracked and actual positions are zero. Preserve the

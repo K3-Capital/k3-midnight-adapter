@@ -12,7 +12,7 @@ for additional production behavior.
 
 Each `BlueMidnightAdapter` instance binds exactly one parent Vault V2, one asset,
 one Morpho Blue market, one Midnight market, one `PolicySetterRatifier`, one
-economic policy, and one approved quoter in its constructor. The adapter is the
+one economic policy, and one curator-rotatable hot root-approver EOA initialized in its constructor. The adapter is the
 Midnight maker and the owner of its lender credit. Vault V2's adapter allocation
 and cap are the sole concentration boundary; there is no adapter-local market
 registry or exposure-cap layer.
@@ -31,9 +31,11 @@ the old adapter only after tracked and actual positions reach zero.
 
 - `allocate` and `deallocate` accept calls only from the immutable parent Vault.
 - Allocation supplies assets to the pinned Morpho Blue market.
-- `onBuy` accepts calls only from the pinned Midnight contract, withdraws the
-  exact buyer assets from the pinned Blue position, and records scalar claim and
-  book-value state before approving Midnight for the exact amount.
+- `onBuy` accepts calls only from the pinned Midnight contract, enforces the
+  parent-Vault allocation bound, withdraws the exact buyer assets from the pinned
+  Blue position, and records scalar claim and book-value state before approving
+  Midnight for the exact amount. The callback remains the authoritative atomic
+  feasibility check; live Blue capacity is not consulted by `acceptsOffer`.
 - `onSell` pins the adapter as seller and proceeds receiver, reduces the scalar
   claim, records realized P&L, and resupplies proceeds to the pinned Blue market.
 - `collectRepayment` is permissionless, keeps proceeds in the adapter, updates
@@ -55,31 +57,39 @@ The operator views are `realAssets`, `expectedSupplyAssets`,
 `blueAvailableLiquidity`, `immediateLiquidity`, `buyerAssetsBound`, `accounting`,
 `pinnedMidnightMarketId`, and `pinnedMidnightMarketHash`.
 
-## Roles and monotonic emergency controls
+## Roles and emergency controls
 
 - The parent Vault owns the economic claim and controls allocation/deallocation.
 - Vault governance adds and caps the adapter; the cap is the exposure boundary.
-- The curator and sentinel can only apply policy-tightening actions permitted by
-  the adapter and Vault roles.
-- The sentinel can activate irreversible `riskOff`, invalidate the current root
-  epoch, revoke the approved quoter, and approve a recovery root only after
-  emergency state is active.
-- Risk-off and quoter revocation block new buys while repayment and policy-valid
+- The curator alone can change the three live policy values in either direction and rotate the root approver;
+  every accepted change increments the epoch and invalidates prior roots. The
+  hot root approver can approve roots only before pause and can revoke roots after
+  pause, but cannot set policy or move assets.
+- The sentinel can activate irreversible `newExposurePaused`, which invalidates
+  the current root epoch and permits recovery-root approval only through the
+  curator or sentinel.
+- The exposure pause blocks new buys while repayment and policy-valid
   reduce-only maker-sell recovery remain available. No emergency function moves
-  primary assets to an operator, curator, quoter, or arbitrary receiver.
+  primary assets to an operator, curator, root approver, or arbitrary receiver.
 
 ## Deployment and operations
 
 The deployment script verifies every constructor identity, complete Blue and
-Midnight market values, economic policy, approved quoter, and expected runtime
+Midnight market values, economic policy, root approver, and expected runtime
 code hash before an operator accepts the deployment for Vault registration. The
 release gate uses the named `deployment` Foundry profile and enforces the adapter
 runtime budget plus EIP-170 for every deployable production contract.
 
-Normal migration is: deploy replacement → verify constructor/code hash and ABI →
-add and cap through Vault V2 governance → allocate gradually → risk-off and
+One `PolicySetterRatifier` is shared by all market-specific adapters targeting the
+same Midnight deployment and chain. Its maker-keyed root and epoch state isolates
+those adapters, while each adapter constructor authorizes the shared ratifier for
+its own maker account. A separate Midnight deployment or incompatible ratifier
+version requires a separate ratifier.
+
+Normal migration for immutable configuration is: deploy replacement → verify constructor/code hash and ABI →
+add and cap through Vault V2 governance → allocate gradually → pause new exposure and
 recover/deallocate the old adapter → remove it after zero tracked and actual
-positions. Monitoring covers risk-off/epoch/quoter events, Blue liquidity,
+positions. Monitoring covers pause/epoch/root-approval events, Blue liquidity,
 parent-Vault cap, book value, claims, losses, P&L, failed exact withdrawals, and
 roots nearing expiry.
 

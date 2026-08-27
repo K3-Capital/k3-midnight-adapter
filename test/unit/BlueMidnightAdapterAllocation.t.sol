@@ -175,12 +175,16 @@ contract BlueMidnightAdapterAllocationTest is Test {
         adapter.allocate(abi.encode(market), 1, bytes4(0), address(0));
     }
 
-    function testAllocationRejectsUnconfiguredMarket() public {
-        MarketParams memory invalid = market;
-        invalid.oracle = address(9);
-        vm.expectRevert(BlueMidnightAdapter.InvalidMarket.selector);
+    function testAllocationRejectsNonEmptyData() public {
+        vm.expectRevert(BlueMidnightAdapter.UnsupportedData.selector);
         vm.prank(address(vault));
-        adapter.allocate(abi.encode(invalid), 1, bytes4(0), address(0));
+        adapter.allocate(abi.encode(market), 1, bytes4(0), address(0));
+    }
+
+    function testDeallocationRejectsNonEmptyData() public {
+        vm.expectRevert(BlueMidnightAdapter.UnsupportedData.selector);
+        vm.prank(address(vault));
+        adapter.deallocate(abi.encode(market), 0, bytes4(0), address(0));
     }
 
     function testAllocationAndDeallocationReturnAssetsThroughAdapter() public {
@@ -189,11 +193,11 @@ contract BlueMidnightAdapterAllocationTest is Test {
         vm.prank(address(vault));
         token.transfer(address(adapter), 100);
         vm.prank(address(vault));
-        adapter.allocate(abi.encode(market), 100, bytes4(0), address(0));
+        adapter.allocate(hex"", 100, bytes4(0), address(0));
         assertEq(token.balanceOf(address(morpho)), 100);
 
         vm.prank(address(vault));
-        adapter.deallocate(abi.encode(market), 100, bytes4(0), address(0));
+        adapter.deallocate(hex"", 100, bytes4(0), address(0));
         assertEq(token.balanceOf(address(adapter)), 100);
         vm.prank(address(vault));
         token.transferFrom(address(adapter), address(vault), 100);
@@ -206,7 +210,7 @@ contract BlueMidnightAdapterAllocationTest is Test {
         vm.prank(address(vault));
         token.transfer(address(adapter), 1_000_000);
         vm.prank(address(vault));
-        adapter.allocate(abi.encode(market), 1_000_000, bytes4(0), address(0));
+        adapter.allocate(hex"", 1_000_000, bytes4(0), address(0));
         morpho.setMarket(market.id(), 1_000_000, 1_000_000, 900_000);
 
         assertEq(adapter.blueAvailableLiquidity(), 100_000);
@@ -221,7 +225,7 @@ contract BlueMidnightAdapterAllocationTest is Test {
         vm.prank(address(vault));
         token.transfer(address(adapter), 1_000);
         vm.prank(address(vault));
-        adapter.allocate(abi.encode(market), 1_000, bytes4(0), address(0));
+        adapter.allocate(hex"", 1_000, bytes4(0), address(0));
         morpho.setShares(market.id(), 4_000_000);
         morpho.setMarket(market.id(), 1_000, 4_000_000, 200);
         vault.setAllocation(adapter.adapterId(), 700);

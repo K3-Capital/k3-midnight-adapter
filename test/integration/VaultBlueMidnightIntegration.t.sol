@@ -266,7 +266,7 @@ contract VaultBlueMidnightIntegrationTest is Test {
         vm.prank(depositor);
         shares = vault.deposit(ASSETS, depositor);
         vm.prank(allocator);
-        vault.allocate(address(adapter), abi.encode(blueMarket), ASSETS);
+        vault.allocate(address(adapter), hex"", ASSETS);
         assertEq(shares, ASSETS);
         assertEq(adapter.expectedSupplyAssets(), ASSETS);
         assertGt(morpho.position(blueMarket.id(), address(adapter)).supplyShares, 0);
@@ -289,7 +289,7 @@ contract VaultBlueMidnightIntegrationTest is Test {
 
         uint256 before = token.balanceOf(depositor);
         vm.prank(allocator);
-        vault.deallocate(address(adapter), abi.encode(blueMarket), ASSETS);
+        vault.deallocate(address(adapter), hex"", ASSETS);
         vm.prank(depositor);
         vault.withdraw(ASSETS, depositor, depositor);
         assertEq(token.balanceOf(depositor), before + ASSETS);
@@ -302,7 +302,7 @@ contract VaultBlueMidnightIntegrationTest is Test {
         vm.prank(depositor);
         uint256 shares = vault.deposit(ASSETS, depositor);
         vm.prank(allocator);
-        vault.allocate(address(adapter), abi.encode(blueMarket), ASSETS);
+        vault.allocate(address(adapter), hex"", ASSETS);
         uint256 priceBeforeFill = vault.convertToAssets(shares);
         assertEq(priceBeforeFill, ASSETS);
 
@@ -320,7 +320,7 @@ contract VaultBlueMidnightIntegrationTest is Test {
         assertEq(vault.convertToAssets(shares), priceBeforeFill);
 
         vm.prank(allocator);
-        vault.deallocate(address(adapter), abi.encode(blueMarket), ASSETS);
+        vault.deallocate(address(adapter), hex"", ASSETS);
         vm.prank(depositor);
         uint256 withdrawn = vault.redeem(shares, depositor, depositor);
         assertEq(withdrawn, ASSETS);
@@ -331,7 +331,7 @@ contract VaultBlueMidnightIntegrationTest is Test {
         vm.prank(depositor);
         vault.deposit(ASSETS, depositor);
         vm.prank(allocator);
-        vault.allocate(address(adapter), abi.encode(blueMarket), ASSETS);
+        vault.allocate(address(adapter), hex"", ASSETS);
 
         Offer memory buy = _buyOffer();
         bytes memory buyData = _approveOffer(buy);

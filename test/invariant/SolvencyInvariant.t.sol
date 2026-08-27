@@ -39,7 +39,7 @@ contract SolvencyInvariantTest is Test {
         vm.prank(address(vault));
         token.transfer(address(adapter), 100);
         vm.prank(address(vault));
-        adapter.allocate(abi.encode(market), 100, bytes4(0), address(0));
+        adapter.allocate(hex"", 100, bytes4(0), address(0));
 
         assertEq(token.balanceOf(address(adapter)), 0);
         assertEq(adapter.realAssets(), adapter.expectedSupplyAssets());

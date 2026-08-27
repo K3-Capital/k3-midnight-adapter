@@ -107,17 +107,17 @@ epoch and invalidates prior roots. Safe-administered policy setters control
 increments the policy epoch. The sentinel's `pauseNewExposure` is monotonic: it
 stops new buys, approvals, and allocation while preserving exits and recovery.
 
-The current build reports 17,251 runtime bytes and 21,130 creation bytes. The
-runtime delta versus the approved Stage 3 measurement (18,991 bytes) is -1,740
+The current build reports 16,892 runtime bytes and 21,036 creation bytes. The
+runtime delta versus the approved Stage 3 measurement (18,991 bytes) is -2,099
 bytes. `runtime_bytes * 200` is only the EVM runtime code-deposit component
-(3,450,200 gas). The reproducible local direct-CREATE fixture is:
+(3,378,400 gas). The reproducible local direct-CREATE fixture is:
 
 ```sh
 forge test --match-path test/unit/DeployPilot.t.sol \
   --match-test testDirectDeploymentRecordsReproducibleConstructorGas -vvvv
 ```
 
-It reports 4,151,152 gas for the constructor transaction in Foundry's local
+It reports 3,755,491 gas for the constructor transaction in Foundry's local
 EVM. This is a reproducible fixture measurement, not a target-chain receipt;
 production total gas must still be captured from the target-chain transaction
 receipt or a chain-specific gas estimate.
@@ -139,7 +139,9 @@ initial root approver, ratifier, and Midnight market. Vault V2 governance must:
 
 1. Verify the constructor and code hash.
 2. Add and cap the adapter through the Vault V2 timelock.
-3. Exercise allocation, callback, repayment, asynchronous maker-sell, and exact
+3. Configure allocation, deallocation, force-deallocation, and liquidity-adapter
+   data as `hex""`; non-empty adapter data is unsupported.
+4. Exercise allocation, callback, repayment, asynchronous maker-sell, and exact
    deallocation paths on the deterministic local deployment.
 
 The curator may change policy in either direction for the pinned market, while the

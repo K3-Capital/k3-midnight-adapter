@@ -248,7 +248,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
     /// @dev This path is intentionally available while the exposure pause is active.
     function collectRepayment(uint256 requestedUnits) external returns (uint256 totalAssets) {
         if (HashLib.hashMarket(_pinnedMidnightMarket) != pinnedMidnightMarketHash) revert InvalidMarket();
-        _checkpoint(pinnedMidnightMarketHash, _pinnedMidnightMarket, 0, 0);
+        _checkpoint(pinnedMidnightMarketHash, _pinnedMidnightMarket, 0, 0, 0, 0);
         uint256 units = requestedUnits;
         uint256 available = IMidnight(midnight).withdrawable(pinnedMidnightMarketId);
         uint256 credit = accountingState.trackedCredit;
@@ -375,7 +375,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         ) {
             revert InvalidOffer();
         }
-        _checkpoint(marketId, market, 0, 0);
+        _checkpoint(marketId, market, 0, 0, units, pendingFeeIncrease);
         if (newExposurePaused || buyerAssets > buyerAssetsBound(marketId)) revert ExposureExceeded();
         // The adapter has exactly one configured Blue route. Empty data is pinned so the offer cannot carry an
         // alternate routing payload that might diverge from the policy predicate.
@@ -390,7 +390,9 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         }
         MarketAccounting storage a = accountingState;
         a.bookValue = _toUint128(uint256(a.bookValue) + buyerAssets);
-        a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) + buyerAssets + pendingFeeIncrease);
+        // Midnight's pending fee belongs to the protocol fee claim, not to the lender. Store lender face value only.
+        uint256 buyerFaceIncrease = units > pendingFeeIncrease ? units - pendingFeeIncrease : 0;
+        a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) + buyerFaceIncrease);
         a.trackedCredit = _toUint128(uint256(a.trackedCredit) + units);
         a.active = true;
         emit BuyFill(marketId, buyerAssets, units, a.bookValue);
@@ -415,7 +417,7 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
             revert InvalidOffer();
         }
         if (data.length != 0 || units == 0) revert InvalidCallback();
-        uint256 postSaleClaim = _checkpoint(marketId, market, pendingFeeDecrease, units);
+        uint256 postSaleClaim = _checkpoint(marketId, market, pendingFeeDecrease, units, 0, 0);
         MarketAccounting storage a = accountingState;
         if (units > a.trackedCredit || a.trackedCredit == 0) revert InsufficientCredit();
         uint256 oldBook = a.bookValue;
@@ -457,23 +459,35 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         }
     }
 
-    function _checkpoint(bytes32, MidnightMarket memory market, uint256 feeDecrease, uint256 soldUnits)
-        internal
-        returns (uint256 postSaleClaim)
-    {
+    function _checkpoint(
+        bytes32,
+        MidnightMarket memory market,
+        uint256 feeDecrease,
+        uint256 soldUnits,
+        uint256 boughtUnits,
+        uint256 boughtPendingFee
+    ) internal returns (uint256 postSaleClaim) {
         MarketAccounting storage a = accountingState;
         if (a.active && a.trackedCredit != 0) {
             (uint128 credit, uint128 pendingFee,) =
                 IMidnight(midnight).updatePositionView(market, IdLib.toId(market), address(this));
-            uint256 preSaleCredit = uint256(credit) + soldUnits;
+            uint256 preSaleCredit = uint256(credit) + soldUnits - boughtUnits;
+            uint256 preSalePendingFee = uint256(pendingFee) + feeDecrease - boughtPendingFee;
             if (preSaleCredit < a.trackedCredit) {
                 uint256 oldCredit = a.trackedCredit;
                 a.bookValue = _toUint128(uint256(a.bookValue) * preSaleCredit / oldCredit);
-                a.netMaturityClaim = _toUint128(uint256(a.netMaturityClaim) * preSaleCredit / oldCredit);
+                // Synchronize against the pre-callback position; sold units and fee deltas reconstruct its face.
+                uint256 preSaleFaceClaim = preSaleCredit > preSalePendingFee ? preSaleCredit - preSalePendingFee : 0;
+                a.netMaturityClaim = _toUint128(preSaleFaceClaim);
                 a.trackedCredit = _toUint128(preSaleCredit);
             }
-            postSaleClaim = uint256(credit) + pendingFee;
-            if (soldUnits == 0 && postSaleClaim < a.netMaturityClaim) a.netMaturityClaim = _toUint128(postSaleClaim);
+            postSaleClaim = credit > pendingFee ? uint256(credit) - pendingFee : 0;
+            if (soldUnits == 0) {
+                postSaleClaim = preSaleCredit > preSalePendingFee ? preSaleCredit - preSalePendingFee : 0;
+            }
+            if (soldUnits == 0 && postSaleClaim < a.netMaturityClaim) {
+                a.netMaturityClaim = _toUint128(postSaleClaim);
+            }
         }
         uint256 checkpoint = a.lastCheckpoint == 0 ? block.timestamp : a.lastCheckpoint;
         if (block.timestamp > checkpoint && a.netMaturityClaim > a.bookValue && market.maturity > checkpoint) {
@@ -497,7 +511,8 @@ contract BlueMidnightAdapter is IBlueMidnightAdapter {
         MidnightMarket memory market = _pinnedMidnightMarket;
         (uint128 credit, uint128 pendingFee,) =
             IMidnight(midnight).updatePositionView(market, IdLib.toId(market), address(this));
-        uint256 claim = uint256(credit) + uint256(pendingFee);
+        // pendingFee is claimable by Midnight's feeClaimer and is excluded from lender NAV.
+        uint256 claim = credit > pendingFee ? uint256(credit) - uint256(pendingFee) : 0;
         uint256 synchronizedClaim = claim < a.netMaturityClaim ? claim : a.netMaturityClaim;
         uint256 accrued = a.bookValue;
         if (block.timestamp > a.lastCheckpoint && market.maturity > a.lastCheckpoint && synchronizedClaim > accrued) {

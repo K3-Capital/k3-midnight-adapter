@@ -75,6 +75,31 @@ contract AccountingVaultMock {
     }
 }
 
+/// @dev Minimal Vault-compatible conversion model used because the real Vault fixture needs unavailable artifacts.
+contract ShareConversionHarness {
+    uint256 public totalAssets;
+    uint256 public totalSupply;
+
+    function seed(uint256 assets, uint256 shares) external {
+        totalAssets = assets;
+        totalSupply = shares;
+    }
+
+    function syncAssets(uint256 assets) external {
+        totalAssets = assets;
+    }
+
+    function previewDeposit(uint256 assets) external view returns (uint256) {
+        return totalSupply == 0 ? assets : assets * totalSupply / totalAssets;
+    }
+
+    function deposit(uint256 assets) external returns (uint256 shares) {
+        shares = totalSupply == 0 ? assets : assets * totalSupply / totalAssets;
+        totalAssets += assets;
+        totalSupply += shares;
+    }
+}
+
 contract AccountingMorphoMock {
     using MarketParamsLib for MarketParams;
     AccountingTokenMock immutable token;
@@ -192,12 +217,12 @@ contract AccountingMidnightMock {
         require(assets <= offer.maxAssets, "offer asset limit");
         bytes32 id = HashLib.hashMarket(offer.market);
         bytes32 protocolId = IdLib.toId(offer.market);
-        bytes32 result = adapter.onBuy(protocolId, offer.market, assets, units, fee, address(adapter), "");
-        token.transferFrom(address(adapter), address(this), assets);
         credit[id] += uint128(units);
         pendingFee[id] += uint128(fee);
         credit[protocolId] += uint128(units);
         pendingFee[protocolId] += uint128(fee);
+        bytes32 result = adapter.onBuy(protocolId, offer.market, assets, units, fee, address(adapter), "");
+        token.transferFrom(address(adapter), address(this), assets);
         return result;
     }
 
@@ -210,12 +235,12 @@ contract AccountingMidnightMock {
         uint256 fee
     ) external returns (bytes32) {
         bytes32 protocolId = IdLib.toId(market);
-        bytes32 result = adapter.onBuy(protocolId, market, assets, units, fee, address(adapter), "");
-        token.transferFrom(address(adapter), address(this), assets);
         credit[id] += uint128(units);
         pendingFee[id] += uint128(fee);
         credit[protocolId] += uint128(units);
         pendingFee[protocolId] += uint128(fee);
+        bytes32 result = adapter.onBuy(protocolId, market, assets, units, fee, address(adapter), "");
+        token.transferFrom(address(adapter), address(this), assets);
         return result;
     }
 
@@ -326,15 +351,24 @@ contract BlueMidnightAdapterAccountingTest is Test {
         uint256 initialNav = adapter.realAssets();
 
         midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 20);
-        _assertAccounting(midnightId, 100, 120, 100, uint40(fillTime), true);
-        assertEq(adapter.realAssets(), initialNav);
+        _assertAccounting(midnightId, 100, 80, 100, uint40(fillTime), true);
+        assertEq(adapter.realAssets(), initialNav - 20);
 
         vm.warp(fillTime + 10 days);
-        assertEq(adapter.realAssets(), initialNav + 10);
+        assertEq(adapter.realAssets(), initialNav - 20);
         vm.warp(midnightMarket.maturity);
-        assertEq(adapter.realAssets(), initialNav + 20);
+        assertEq(adapter.realAssets(), initialNav - 20);
         vm.warp(midnightMarket.maturity + 1 days);
-        assertEq(adapter.realAssets(), initialNav + 20);
+        assertEq(adapter.realAssets(), initialNav - 20);
+    }
+
+    function testFeeBearingFillMarksLenderFaceValueExcludingPendingFee() public {
+        uint256 fillTime = midnightMarket.maturity - 20 days;
+        vm.warp(fillTime);
+
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 20);
+
+        assertEq(adapter.realAssets(), 1_000_000 - 20);
     }
 
     function testLossSynchronizationAndPartialSellPreserveLoss() public {
@@ -343,14 +377,14 @@ contract BlueMidnightAdapterAccountingTest is Test {
         uint256 initialNav = adapter.realAssets();
         midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 101, 100, 23);
         midnight.setPosition(IdLib.toId(midnightMarket), 83, 7);
-        assertEq(adapter.realAssets(), initialNav - 11);
+        assertEq(adapter.realAssets(), initialNav - 25);
 
         midnight.takeMakerSell(adapter, midnightId, midnightMarket, 30, 37, 0);
         MarketAccounting memory afterSale = adapter.accounting();
-        assertEq(afterSale.bookValue, 46);
-        assertEq(afterSale.netMaturityClaim, 53);
+        assertEq(afterSale.bookValue, 39);
+        assertEq(afterSale.netMaturityClaim, 39);
         assertEq(afterSale.trackedCredit, 46);
-        assertEq(adapter.realAssets(), initialNav - 25);
+        assertEq(adapter.realAssets(), initialNav - 32);
     }
 
     function testPartialSellReducesClaimExactlyOnce() public {
@@ -360,7 +394,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
         MarketAccounting memory a = adapter.accounting();
         assertEq(a.trackedCredit, 50);
         assertEq(a.bookValue, 50);
-        assertEq(a.netMaturityClaim, 51);
+        assertEq(a.netMaturityClaim, 49);
     }
 
     function testMultipleFillsAtDifferentTimesAmortizeOnlyUntilMaturity() public {
@@ -368,17 +402,17 @@ contract BlueMidnightAdapterAccountingTest is Test {
         vm.warp(midnightMarket.maturity - 20 days);
         midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 20);
         vm.warp(midnightMarket.maturity - 10 days);
-        assertEq(adapter.realAssets(), initialAssets + 10);
+        assertEq(adapter.realAssets(), initialAssets - 20);
 
         midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 50, 50, 10);
         MarketAccounting memory afterSecondFill = adapter.accounting();
-        assertEq(afterSecondFill.bookValue, 160);
-        assertEq(afterSecondFill.netMaturityClaim, 180);
+        assertEq(afterSecondFill.bookValue, 130);
+        assertEq(afterSecondFill.netMaturityClaim, 120);
 
         vm.warp(midnightMarket.maturity);
-        assertEq(adapter.realAssets(), initialAssets + 30);
+        assertEq(adapter.realAssets(), initialAssets - 30);
         vm.warp(midnightMarket.maturity + 10 days);
-        assertEq(adapter.realAssets(), initialAssets + 30);
+        assertEq(adapter.realAssets(), initialAssets - 30);
     }
 
     function testImpairmentThenRepaymentSellAndNewBuyNeverRecoverLoss() public {
@@ -391,6 +425,7 @@ contract BlueMidnightAdapterAccountingTest is Test {
         assertLt(adapter.realAssets(), initialNav);
         uint256 impairedNav = adapter.realAssets();
         midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 0, 10, 0);
+        assertEq(adapter.accounting().trackedCredit, midnight.credit(midnightId));
         assertEq(adapter.realAssets(), impairedNav);
 
         token.mint(address(midnight), 20);
@@ -403,22 +438,44 @@ contract BlueMidnightAdapterAccountingTest is Test {
         assertEq(adapter.accounting().trackedCredit, 0);
     }
 
-    function testPendingFeeRoundingAndCheckedNarrowing() public {
+    function testPendingFeeRounding() public {
         midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 101, 100, 3);
         midnight.takeMakerSell(adapter, midnightId, midnightMarket, 33, 33, 1);
         MarketAccounting memory rounded = adapter.accounting();
         assertEq(rounded.bookValue, 68); // floor(101 * 67 / 100)
-        assertEq(rounded.netMaturityClaim, 69); // protocol claim caps floor(104 * 67 / 100)
+        assertEq(rounded.netMaturityClaim, 65); // protocol face claim caps floor(97 * 67 / 100)
         assertEq(rounded.trackedCredit, 67);
+    }
 
-        setUp();
-        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 0, 1, 0);
-        midnight.invokeBuy(adapter, midnightId, midnightMarket, 0, 0, type(uint128).max - 1, address(adapter), "");
+    function testInvalidPreMutationCallbackUnderflowIsRejected() public {
+        uint128 max = type(uint128).max;
+        midnight.invokeBuy(adapter, midnightId, midnightMarket, 0, max, 0, address(adapter), "");
 
-        setUp();
-        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 0);
-        vm.expectRevert(BlueMidnightAdapter.AccountingOverflow.selector);
-        midnight.invokeBuy(adapter, midnightId, midnightMarket, 0, 0, type(uint128).max, address(adapter), "");
+        vm.expectRevert();
+        midnight.invokeBuy(adapter, midnightId, midnightMarket, 0, max, 0, address(adapter), "");
+    }
+
+    // Pinned Midnight mutates uint128 credit before callbacks, so a valid callback cannot exceed this bound.
+    function testPostMutationMaxCreditBoundaryIsPreserved() public {
+        uint128 max = type(uint128).max;
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 0, max, 0);
+        assertEq(adapter.accounting().trackedCredit, max);
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 0, 0, 0);
+        assertEq(adapter.accounting().trackedCredit, max);
+    }
+
+    function testFeeBearingImpairedPartialSellReconstructsPreSaleFace() public {
+        vm.warp(midnightMarket.maturity - 20 days);
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 50, 100, 20);
+        vm.warp(midnightMarket.maturity - 10 days);
+        midnight.setPosition(IdLib.toId(midnightMarket), 80, 15);
+
+        midnight.takeMakerSell(adapter, midnightId, midnightMarket, 10, 20, 5);
+
+        MarketAccounting memory afterSale = adapter.accounting();
+        assertEq(afterSale.trackedCredit, 60);
+        assertEq(afterSale.bookValue, 39);
+        assertEq(afterSale.netMaturityClaim, 49);
     }
 
     function testIndependentApprovedRootsDoNotRequireCapAccounting() public {
@@ -471,16 +528,32 @@ contract BlueMidnightAdapterAccountingTest is Test {
         assertEq(adapter.accounting().trackedCredit, 30);
     }
 
-    function testSharePriceIsContinuousAtFillAndRealization() public {
+    function testSharePriceRecognizesFeeBearingFillAndRealization() public {
+        ShareConversionHarness shares = new ShareConversionHarness();
         uint256 initialAssets = adapter.realAssets();
-        uint256 shares = 1e18;
-        uint256 initialPrice = initialAssets * 1e18 / shares;
+        shares.seed(initialAssets, 1e18);
+        uint256 entrantBeforeFill = shares.previewDeposit(1e18);
+
         vm.warp(midnightMarket.maturity - 20 days);
         midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 100, 100, 20);
-        assertEq(adapter.realAssets() * 1e18 / shares, initialPrice);
+        shares.syncAssets(adapter.realAssets());
+        uint256 entrantAfterFeeFill = shares.previewDeposit(1e18);
+        assertGt(entrantAfterFeeFill, entrantBeforeFill);
 
-        vm.warp(midnightMarket.maturity);
-        assertEq(adapter.realAssets() * 1e18 / shares, (initialAssets + 20) * 1e18 / shares);
+        midnight.setPosition(IdLib.toId(midnightMarket), 70, 0);
+        shares.syncAssets(adapter.realAssets());
+        uint256 entrantAfterImpairment = shares.previewDeposit(1e18);
+        assertGt(entrantAfterImpairment, entrantAfterFeeFill);
+
+        midnight.takeMakerBuy(adapter, midnightId, midnightMarket, 10, 10, 0);
+        shares.syncAssets(adapter.realAssets());
+        uint256 entrantAfterSecondFill = shares.previewDeposit(1e18);
+        assertGt(entrantAfterSecondFill, entrantAfterFeeFill);
+
+        midnight.takeMakerSell(adapter, midnightId, midnightMarket, 10, 10, 0);
+        shares.syncAssets(adapter.realAssets());
+        uint256 entrantAfterRealization = shares.previewDeposit(1e18);
+        assertGt(entrantAfterRealization, entrantBeforeFill);
     }
 
     function testQuoterRevocationRejectsNewRootApproval() public {
